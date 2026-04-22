@@ -31,11 +31,11 @@ extern "C" {
  *
  * @param szPath Palette source path.
  * @param pPalette Palette destination pointer.
- * @param ubMaxLength Maximum number of colors to read (255 max for this API).
+ * @param ubMaxLength Maximum number of colors to read.
  *
  * @see paletteLoadFromFd()
  */
-void paletteLoadFromPath(const char *szPath, UWORD *pPalette, UBYTE ubMaxLength);
+void paletteLoadFromPath(const char *szPath, UWORD *pPalette, UWORD ubMaxLength);
 
 /**
  * @brief Saves ECS/OCS palette into .plt v2 file (PLT_NEW_ECS + BE count + packed colours).
@@ -60,11 +60,11 @@ void paletteSaveAGA(const ULONG *pPalette, UWORD uwColorCnt, char *szPath);
  * @param pFile Handle to the palette file. Will be closed on function return.
  * @param pPalette Palette destination pointer. For v2 AGA files, this must be
  *        storage suitable for `ULONG` per entry (e.g. AGA viewport palette).
- * @param ubMaxLength Maximum number of colors to read (at most 255).
+ * @param ubMaxLength Maximum number of colors to read.
  *
  * @see paletteLoadFromPath()
  */
-void paletteLoadFromFd(tFile *pFile, UWORD *pPalette, UBYTE ubMaxLength);
+void paletteLoadFromFd(tFile *pFile, UWORD *pPalette, UWORD ubMaxLength);
 
 /**
  * @brief Dims palette to given brightness level.
@@ -82,7 +82,7 @@ void paletteDim(
 
 #ifdef ACE_USE_AGA_FEATURES
 void paletteDimAGA(
-    ULONG *pSource, volatile ULONG *pDest, UBYTE ubColorCount, UBYTE ubLevel
+    ULONG *pSource, volatile ULONG *pDest, UWORD ubColorCount, UBYTE ubLevel
 );
 #endif
 

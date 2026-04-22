@@ -25,11 +25,11 @@ static void pltWriteUwordBE(tFile *pFile, UWORD uwValue) {
 	fileWrite(pFile, &ubLo, sizeof(UBYTE));
 }
 
-void paletteLoadFromPath(const char *szPath, UWORD *pPalette, UBYTE ubMaxLength) {
+void paletteLoadFromPath(const char *szPath, UWORD *pPalette, UWORD ubMaxLength) {
 	return paletteLoadFromFd(diskFileOpen(szPath, DISK_FILE_MODE_READ, 1), pPalette, ubMaxLength);
 }
 
-void paletteLoadFromFd(tFile *pFile, UWORD *pPalette, UBYTE ubMaxLength) {
+void paletteLoadFromFd(tFile *pFile, UWORD *pPalette, UWORD ubMaxLength) {
 	logBlockBegin(
 		"paletteLoadFromFd(pFile: %p, pPalette: %p, ubMaxLength: %hu)",
 		pFile, pPalette, ubMaxLength
@@ -189,7 +189,7 @@ void paletteDim(
 }
 
 #ifdef ACE_USE_AGA_FEATURES
-void paletteDimAGA(ULONG *pSource, volatile ULONG *pDest, UBYTE ubColorCount, UBYTE ubLevel) {
+void paletteDimAGA(ULONG *pSource, volatile ULONG *pDest, UWORD ubColorCount, UBYTE ubLevel) {
 	for(UWORD c = 0; c < ubColorCount; ++c) {
 		pDest[c] = paletteColorDimAGA(pSource[c],  ubLevel) ;
 	}
