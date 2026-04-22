@@ -18,14 +18,23 @@ extern "C" {
 
 #include <ace/types.h>
 #include <ace/utils/extview.h>
+#ifdef ACE_CAMERA_SUBPIXEL
+#include <fixmath/fix16.h>
+#endif
 
 typedef struct _tCameraManager {
 	tVpManager sCommon;
-	tUwCoordYX uPos;        ///< Current camera pos
+	tUwCoordYX uPos;        ///< Current camera pos (floor when ACE_CAMERA_SUBPIXEL)
 	tUwCoordYX uLastPos[2]; ///< Previous camera pos
 	tUwCoordYX uMaxPos;     ///< Max camera pos: world W&H - camera W&H
 	UBYTE ubBfr;            ///< Currently used buffer for double buffering
 	UBYTE isDblBfr;
+#ifdef ACE_CAMERA_SUBPIXEL
+	fix16_t fPosX;          ///< Sub-pixel camera X (when ACE_CAMERA_SUBPIXEL)
+	fix16_t fPosY;
+	fix16_t fLastPosX;      ///< Previous frame fPos (for cameraIsMoved)
+	fix16_t fLastPosY;
+#endif
 } tCameraManager;
 
 tCameraManager *cameraCreate(
@@ -56,6 +65,28 @@ UWORD cameraGetYDiff(const tCameraManager *pManager);
 WORD cameraGetDeltaX(const tCameraManager *pManager);
 
 WORD cameraGetDeltaY(const tCameraManager *pManager);
+
+/**
+ * Integer pixel coordinate for copper / horizontal scroll (nearest to fractional pos).
+ */
+UWORD cameraGetScrollPixelX(const tCameraManager *pManager);
+
+/**
+ * Integer pixel coordinate for copper / vertical scroll (nearest to fractional pos).
+ */
+UWORD cameraGetScrollPixelY(const tCameraManager *pManager);
+
+#ifdef ACE_CAMERA_SUBPIXEL
+/**
+ * Sets camera position in 16.16 fixed point; updates uPos to floor toward zero.
+ */
+void cameraSetCoordFixed(tCameraManager *pManager, fix16_t fX, fix16_t fY);
+
+/**
+ * Moves camera by fractional deltas; clamps to max bounds.
+ */
+void cameraMoveByFixed(tCameraManager *pManager, fix16_t fDx, fix16_t fDy);
+#endif
 
 #ifdef __cplusplus
 }

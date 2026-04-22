@@ -54,6 +54,9 @@ tView *viewCreate(void *pTags, ...) {
 	if(tagGet(pTags, vaTags, TAG_VIEW_USES_AGA, 1)) {
 		pView->uwFlags |= VIEW_FLAG_GLOBAL_AGA;
 	}
+	if(tagGet(pTags, vaTags, TAG_VIEW_GLOBAL_FMODE, 1)) {
+		pView->uwFlags |= VIEW_FLAG_GLOBAL_FMODE;
+	}
 	#endif
 	logWrite(
 		"Extra flags: %s%s%s\n",
@@ -62,7 +65,11 @@ tView *viewCreate(void *pTags, ...) {
 		(pView->uwFlags & VIEW_FLAG_GLOBAL_HRES) ? "GLOBAL_HRES " : ""
 	);
 	#ifdef ACE_USE_AGA_FEATURES
-	logWrite("Global AGA: %s\n", (pView->uwFlags & VIEW_FLAG_GLOBAL_AGA) ? "YES" : "NO");
+	logWrite(
+		"Global AGA: %s, Global FMODE: %s\n",
+		(pView->uwFlags & VIEW_FLAG_GLOBAL_AGA) ? "YES" : "NO",
+		(pView->uwFlags & VIEW_FLAG_GLOBAL_FMODE) ? "YES" : "NO"
+	);
 	#endif
 
 	// Get the Y pos and height
@@ -237,7 +244,7 @@ void viewLoad(tView *pView)
 		g_pCustom->bplcon0 = 0; // No output
 #ifdef ACE_USE_AGA_FEATURES
 		g_pCustom->bplcon3 = 0; // AGA fix
-		g_pCustom->fmode = pView->pFirstVPort->ubFmode;	// AGA fix
+		g_pCustom->fmode = 0;
 #else
 		g_pCustom->bplcon3 = 0; // AGA fix
 		g_pCustom->fmode =0;	// AGA fix
@@ -370,14 +377,23 @@ tVPort *vPortCreate(void *pTagList, ...)
 	pVPort->ubBpp = tagGet(pTagList, vaTags, TAG_VPORT_BPP, uwDefaultBpp);
 
 #ifdef ACE_USE_AGA_FEATURES
-if(
-	tagGet(pTagList, vaTags, TAG_VPORT_USES_AGA, 0) ||
-	((pView->uwFlags & VIEW_FLAG_GLOBAL_AGA) && pPrevVPort && pPrevVPort->eFlags & VP_FLAG_AGA)
-) {
-	pVPort->eFlags |= VP_FLAG_AGA;
-}
-	const UBYTE ubDefaultFmode = 0;
+{
+	tVPort *pLastInChain = pView->pFirstVPort;
+	while(pLastInChain && pLastInChain->pNext) {
+		pLastInChain = pLastInChain->pNext;
+	}
+	if(
+		tagGet(pTagList, vaTags, TAG_VPORT_USES_AGA, 0) ||
+		((pView->uwFlags & VIEW_FLAG_GLOBAL_AGA) && pPrevVPort && pPrevVPort->eFlags & VP_FLAG_AGA)
+	) {
+		pVPort->eFlags |= VP_FLAG_AGA;
+	}
+	const UBYTE ubDefaultFmode =
+		((pView->uwFlags & VIEW_FLAG_GLOBAL_FMODE) && pLastInChain)
+			? pLastInChain->ubFmode
+			: 0;
 	pVPort->ubFmode = tagGet(pTagList, vaTags, TAG_VPORT_FMODE, ubDefaultFmode);
+}
 #endif
 	
 	// Get dimensions

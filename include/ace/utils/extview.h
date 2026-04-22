@@ -40,7 +40,9 @@ typedef enum tTagView {
 	// If set to non-zero, view will use first vport's horizontal resolution (hires on/off) setting for whole screen.
 	TAG_VIEW_GLOBAL_HRES       = TAG_USER | 9,
 #ifdef ACE_USE_AGA_FEATURES
-    TAG_VIEW_USES_AGA          = TAG_USER | 10
+	TAG_VIEW_USES_AGA          = TAG_USER | 10,
+	/** Non-zero: later viewports inherit first viewport's FMODE unless overridden. */
+	TAG_VIEW_GLOBAL_FMODE      = TAG_USER | 11,
 #endif
 } tTagView;
 
@@ -76,7 +78,14 @@ typedef enum tTagVport {
 #endif
 } tTagVport;
 
-
+#ifdef ACE_USE_AGA_FEATURES
+/** Bitplane fetch class: low 2 bits of FMODE ($DFF1FC). */
+#define ACE_BITPLANE_FMODE_2BYTE 0u
+#define ACE_BITPLANE_FMODE_BPL32 1u
+#define ACE_BITPLANE_FMODE_BPAGE 2u
+#define ACE_BITPLANE_FMODE_8BYTE 3u
+#define ACE_BITPLANE_FMODE_MASK  3u
+#endif
 
 /* Types */
 
@@ -90,6 +99,7 @@ typedef enum tViewFlags {
 	VIEW_FLAG_GLOBAL_HRES    = BV(3),
 #ifdef ACE_USE_AGA_FEATURES
 	VIEW_FLAG_GLOBAL_AGA     = BV(4),
+	VIEW_FLAG_GLOBAL_FMODE   = BV(5),
 #endif
 } tViewFlags;
 
@@ -166,7 +176,8 @@ typedef struct _tVPort {
 	// Color info
 	UBYTE ubBpp;        ///< Bitplane count
 #ifdef ACE_USE_AGA_FEATURES
-	UBYTE ubFmode;	  ///< FMODE value
+	/** Full $DFF1FC value; low two bits select bitplane fetch width (see ACE_BITPLANE_FMODE_*). */
+	UBYTE ubFmode;
 #endif
 	
 	UWORD* pPalette;

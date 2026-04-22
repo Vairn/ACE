@@ -88,6 +88,9 @@ target_compile_definitions(${TARGET_NAME} PUBLIC ACE_SCROLLBUFFER_Y_MARGIN_SIZE=
 if(ACE_USE_AGA_FEATURES)
 	target_compile_definitions(${TARGET_NAME} PUBLIC ACE_USE_ECS_FEATURES ACE_USE_AGA_FEATURES)
 endif()
+if(ACE_CAMERA_SUBPIXEL)
+	target_compile_definitions(${TARGET_NAME} PUBLIC ACE_CAMERA_SUBPIXEL)
+endif()
 
 if(M68K_COMPILER MATCHES "Bartman")
 	include(cmake/CPM.cmake)

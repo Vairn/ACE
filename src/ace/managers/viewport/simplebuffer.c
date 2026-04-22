@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <ace/managers/viewport/simplebuffer.h>
+#include <ace/managers/viewport/viewport_scroll.h>
 #include <proto/exec.h>
 #include <ace/utils/tag.h>
 #include <ace/utils/extview.h>
@@ -41,13 +42,14 @@ static void simpleBufferInitializeCopperList(
 
 	// http://amigadev.elowar.com/read/ADCD_2.1/Hardware_Manual_guide/node0085.html
 	UWORD uwDDfStrt = (pManager->sCommon.pVPort->pView->ubPosX + 15) / 2 - 16;
-	
-	UWORD uwDDFStep = ((pManager->sCommon.pVPort->pView->uwWidth / 16)-1)*8;
 #ifdef ACE_USE_AGA_FEATURES
-	if (pManager->sCommon.pVPort->ubFmode == 3)
-	{
-		uwDDFStep = ((pManager->sCommon.pVPort->pView->uwWidth / 16)-1)*6;
-	}
+	UWORD uwDDFStep = viewportCalcDdfStep(
+		pManager->sCommon.pVPort->pView, pManager->sCommon.pVPort->ubFmode
+	);
+#else
+	UWORD uwDDFStep = viewportCalcDdfStep(
+		pManager->sCommon.pVPort->pView, 0
+	);
 #endif
 	UWORD uwDDfStop = uwDDfStrt + uwDDFStep;
 	if(pManager->sCommon.pVPort->eFlags & VP_FLAG_HIRES) {
@@ -121,6 +123,11 @@ static void simpleBufferInitializeCopperList(
 	else {
 		tCopBlock *pBlock = pManager->pCopBlock;
 		pBlock->uwCurrCount = 0; // Rewind to beginning
+#ifdef ACE_USE_AGA_FEATURES
+		copMove(
+			pCopList, pBlock, &g_pCustom->fmode, pManager->sCommon.pVPort->ubFmode
+		);
+#endif
 		copMove(pCopList, pBlock, &g_pCustom->ddfstop, uwDDfStop); // Data fetch
 		copMove(pCopList, pBlock, &g_pCustom->ddfstrt, uwDDfStrt);
 		copMove(pCopList, pBlock, &g_pCustom->bpl1mod, uwModulo); // Bitplane modulo
@@ -145,24 +152,21 @@ static void simpleBufferSetBack(tSimpleBufferManager *pManager, tBitMap *pBack) 
 }
 
 static UWORD simpleBufferCalcBplOffsAndShift(tSimpleBufferManager *pManager, ULONG *pBplOffs) {
-	// Calculate X movement: bitplane shift, starting word to fetch
 	UWORD uwShift;
 	if(pManager->ubFlags & SIMPLEBUFFER_FLAG_X_SCROLLABLE) {
-		uwShift = (16 - (pManager->pCamera->uPos.uwX & 0xF)) & 0xF; // Bitplane shift - single
-		*pBplOffs = ((pManager->pCamera->uPos.uwX - 1) >> 4) << 1;  // Must be ULONG!
-		if(pManager->sCommon.pVPort->eFlags & VP_FLAG_HIRES) {
-			uwShift >>= 1; // Usable scroll values are 0..7, shifts 2 pixels per value
-			*pBplOffs -= 2; // Fetch 4 bytes (2 words) in scrolling instead of 2 (4)
-		}
-		uwShift = (uwShift << 4) | uwShift; // Convert to bplcon format - PF1 | PF2
+		UWORD uwScrollX = cameraGetScrollPixelX(pManager->pCamera);
+		viewportCalcBplScrollX(
+			pManager->sCommon.pVPort, uwScrollX, &uwShift, pBplOffs
+		);
 	}
 	else {
 		uwShift = 0;
-		*pBplOffs = (pManager->pCamera->uPos.uwX >> 4) << 1;
+		*pBplOffs = (cameraGetScrollPixelX(pManager->pCamera) >> 4) << 1;
 	}
 
 	// Calculate Y movement
-	*pBplOffs += pManager->pBack->BytesPerRow * pManager->pCamera->uPos.uwY;
+	*pBplOffs +=
+		pManager->pBack->BytesPerRow * cameraGetScrollPixelY(pManager->pCamera);
 	return uwShift;
 }
 
@@ -251,8 +255,12 @@ tSimpleBufferManager *simpleBufferCreate(void *pTags, ...) {
 	if(pCopList->ubMode == COPPER_MODE_BLOCK) {
 		// CopBlock contains: bitplanes + shiftX
 		pManager->pCopBlock = copBlockCreate(
-			// WAIT is already in copBlock so 1 instruction less
-			pCopList, simpleBufferGetRawCopperlistInstructionCount(pVPort->ubBpp) - 1,
+			// WAIT is already in copBlock so 1 instruction less; AGA: +1 MOVE for FMODE
+			pCopList, simpleBufferGetRawCopperlistInstructionCount(pVPort->ubBpp) - 1
+#ifdef ACE_USE_AGA_FEATURES
+			+ 1
+#endif
+			,
 			// Vertically addition from DiWStrt, horizontally just so that 6bpp can be set up.
 			// First to set are ddf, modulos & shift so they are changed during fetch.
 			s_pCopperWaitXByBitplanes[pVPort->ubBpp],
@@ -345,7 +353,12 @@ void simpleBufferProcess(tSimpleBufferManager *pManager) {
 		// copperlist needs refreshing.
 		ULONG ulBplOffs;
 		UWORD uwShift = simpleBufferCalcBplOffsAndShift(pManager, &ulBplOffs);
-		pManager->pCopBlock->uwCurrCount = 4; // Rewind to shift cmd pos
+		// After DDF/MOD (4) on OCS/ECS/AGA; AGA also has FMODE (0) so bplcon1 is 5
+		pManager->pCopBlock->uwCurrCount = 4
+#ifdef ACE_USE_AGA_FEATURES
+			+ 1
+#endif
+		; // Rewind to shift cmd pos
 		copMove(pCopList, pManager->pCopBlock, &g_pCustom->bplcon1, uwShift);
 		for(UBYTE i = 0; i < pManager->pBack->Depth; ++i) {
 			ULONG ulPlaneAddr = ((ULONG)pManager->pBack->Planes[i]) + ulBplOffs;

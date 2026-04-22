@@ -43,6 +43,34 @@ its features:
   facilitating large scrolls it manages drawing background for you using
   tilemaps. This is what you'll most likely want to use.
 
+### AGA wide fetch and scroll (`ACE_BITPLANE_FMODE_8BYTE`)
+
+On AGA, `TAG_VPORT_FMODE` sets `$DFF1FC`. The **low two bits** select bitplane
+fetch width (macros `ACE_BITPLANE_FMODE_*` in `ace/utils/extview.h`). With
+**`ACE_BITPLANE_FMODE_8BYTE`** (%11), lores playfields use **64-pixel** fine
+scroll (`BPLCON1`), and bitplane pointers move in **8-byte** steps over the
+bitmap. Simple and scroll buffer managers share **`viewport_scroll`** so **DDF**
+and **`BPLCON1`** / pointer math stay aligned. **Hires** keeps the usual
+16-pixel fine-scroll path.
+
+On **multi-viewport** screens, **`TAG_VIEW_GLOBAL_FMODE`** makes each new
+viewport inherit the previous one’s **`ubFmode`** unless you pass
+**`TAG_VPORT_FMODE`**. With **`ACE_USE_AGA_FEATURES`**, CopBlock setups also
+emit a **`MOVE`** to **`fmode`** at each viewport band so stacked viewports can
+use different fetch modes (`COPPER_MODE_RAW` lists must include **`fmode`**
+yourself).
+
+### Fractional camera (`ACE_CAMERA_SUBPIXEL`)
+
+When ACE is built with CMake option **`ACE_CAMERA_SUBPIXEL`** enabled, the
+camera stores **16.16 fixed-point** (`fix16`) X/Y internally. **`uPos` stays
+the floor** (toward zero) so tile-buffer margin and tile indexing behave as
+before. **`cameraGetScrollPixelX`** / **`cameraGetScrollPixelY`** return the
+**nearest integer pixel** for scroll-buffer and simple-buffer copper updates.
+Use **`cameraSetCoordFixed`** / **`cameraMoveByFixed`** to drive the
+fractional camera; ordinary **`cameraSetCoord`** / **`cameraMoveBy`** snap
+fractional storage to integers.
+
 ## Tutorial code
 
 Now let's expand `src/game.c` with basic view & viewport creation. There'll be

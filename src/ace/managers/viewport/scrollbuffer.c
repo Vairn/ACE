@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <ace/managers/viewport/scrollbuffer.h>
+#include <ace/managers/viewport/viewport_scroll.h>
 #include <ace/utils/tag.h>
 #include <ace/generic/screen.h> // Has the look up table for the COPPER_X_WAIT values.
 #include <limits.h>
@@ -70,7 +71,11 @@ tScrollBufferManager *scrollBufferCreate(void *pTags, ...) {
 	pCopList = pVPort->pView->pCopList;
 	if(pCopList->ubMode == COPPER_MODE_BLOCK) {
 		pManager->pStartBlock = copBlockCreate(
-			pVPort->pView->pCopList, 2 * pVPort->ubBpp + 8,
+			pVPort->pView->pCopList, 2 * pVPort->ubBpp + 8
+#ifdef ACE_USE_AGA_FEATURES
+			+ 1
+#endif
+			,
 			// Vertically addition from DiWStrt, horizontally just so that 6bpp can be set up.
 			// First to set are ddf, modulos & shift so they are changed during fetch.
 			s_pCopperWaitXByBitplanes[pVPort->ubBpp], pVPort->uwOffsY + pVPort->pView->ubPosY -1
@@ -259,20 +264,17 @@ void scrollBufferProcess(tScrollBufferManager *pManager) {
 
 	// TODO: use deltaX and deltaY to decide if we need to update anything
 
-	// convert camera pos to scroll pos
-	UWORD uwScrollX = pManager->pCamera->uPos.uwX;
+	// convert camera pos to scroll pos (nearest pixel for copper when fractional cam)
+	UWORD uwScrollX = cameraGetScrollPixelX(pManager->pCamera);
 	UWORD uwScrollY = SCROLLBUFFER_HEIGHT_MODULO(
-		pManager->pCamera->uPos.uwY, pManager->uwBmAvailHeight
+		cameraGetScrollPixelY(pManager->pCamera), pManager->uwBmAvailHeight
 	);
 
-	// preparations for new copperlist
-	UWORD uwShift = (16 - (uwScrollX & 0xF)) & 0xF; // Bitplane shift - single
-	ULONG ulBplAddX = ((uwScrollX - 1) >> 4) << 1;  // must be ULONG!
-	if(pManager->sCommon.pVPort->eFlags & VP_FLAG_HIRES) {
-		uwShift >>= 1; // Usable scroll values are 0..7, shifts 2 pixels per value
-		ulBplAddX -= 2; // Fetch 4 bytes (2 words) in scrolling instead of 2 (4)
-	}
-	uwShift = (uwShift << 4) | uwShift;             // Bitplane shift - PF1 | PF2
+	UWORD uwShift;
+	ULONG ulBplAddX;
+	viewportCalcBplScrollX(
+		pManager->sCommon.pVPort, uwScrollX, &uwShift, &ulBplAddX
+	);
 
 	tCopList *pCopList = pManager->sCommon.pVPort->pView->pCopList;
 
@@ -306,7 +308,11 @@ void scrollBufferProcess(tScrollBufferManager *pManager) {
 		}
 		// NOTE trying to set colors before and after copper instructions made vport
 		// move one line lower on 4bpp - there will be problem on 5 & 6bpp
-		pBlock->uwCurrCount += 4; // Add constant part
+		pBlock->uwCurrCount += 4
+#ifdef ACE_USE_AGA_FEATURES
+			+ 1
+#endif
+		; // Add constant part (FMODE + DDF/mod on AGA)
 
 		// Copper block after Y-break
 		pBlock = pManager->pBreakBlock;
@@ -390,7 +396,14 @@ void scrollBufferReset(
 	pManager->uwModulo = pManager->pBack->BytesPerRow - (uwVpWidth >> 3) - 2;
 
 	pManager->uwDDfStrt = (pManager->sCommon.pVPort->pView->ubPosX + 15) / 2 - 16;
-	pManager->uwDDfStop = pManager->uwDDfStrt + ((pManager->sCommon.pVPort->pView->uwWidth / 16) - 1) * 8;
+#ifdef ACE_USE_AGA_FEATURES
+	UBYTE ubFmode = pManager->sCommon.pVPort->ubFmode;
+#else
+	UBYTE ubFmode = 0;
+#endif
+	pManager->uwDDfStop = pManager->uwDDfStrt + viewportCalcDdfStep(
+		pManager->sCommon.pVPort->pView, ubFmode
+	);
 	pManager->uwDDfStrt -= 8; // for scroll reasons
 	if(pManager->sCommon.pVPort->eFlags & VP_FLAG_HIRES) {
 		// Start/stop one 4-step bitplane fetch pattern later: 3120
@@ -435,6 +448,11 @@ void scrollBufferReset(
 		));
 		// After bitplane ptrs & bplcon
 		pBlock->uwCurrCount = 2 * pManager->sCommon.pVPort->ubBpp + 1;
+#ifdef ACE_USE_AGA_FEATURES
+		copMove(
+			pCopList, pBlock, &g_pCustom->fmode, pManager->sCommon.pVPort->ubFmode
+		);
+#endif
 		copMove(pCopList, pBlock, &g_pCustom->ddfstrt, pManager->uwDDfStrt); // Fetch start
 		copMove(pCopList, pBlock, &g_pCustom->bpl1mod, pManager->uwModulo);  // Odd planes modulo
 		copMove(pCopList, pBlock, &g_pCustom->bpl2mod, pManager->uwModulo);  // Even planes modulo
