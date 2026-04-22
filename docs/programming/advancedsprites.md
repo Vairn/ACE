@@ -20,6 +20,22 @@ Be aware that it can take 2 or 4 channels on the 8 available on Amiga :
 | 16     | 16px  | Even (0,2,4,6)| 2                        |
 | 16     | 32px  | Even (0,2,4,6)| 4                        |
 
+## Wide sprites vs basic sprites (AGA)
+
+ACE advanced sprites **only strip and slice 16px-wide tiles** internally (`SPRITE_WIDTH`); supported source stripes are **16px or 32px** wide (`bitmapGetByteWidth()` 2 or 4 bytes). For **64px** wide DMA sprites, use the **basic** sprite manager (`spriteAdd` / `spriteSetBitmap`) with a matching interleaved bitmap and correct **`FMODE`**.
+
+On AGA, **`$DFF1FC` FMODE** is one register for **both** bitplane fetch (bits 0–1) **and** sprite width (bits 2–3). Set viewport **`TAG_VPORT_FMODE`** / **`ubFmode`** so it matches your playfield **and** sprite width. Use **`ACE_FMODE_PLANE_FETCH_*`**, **`ACE_FMODE_SPRITE_*`**, and **`ACE_FMODE_PACK()`** in [`include/ace/utils/extview.h`](../../include/ace/utils/extview.h). Reference table: [AGA how-to — Sprites / FMODE](https://jvaltane.kapsi.fi/amiga/howtocode/aga.html).
+
+**Examples**
+
+- 32px wide 4‑colour sprites: combine your normal bitplane fetch class with **`ACE_FMODE_SPRITE_32PX_ENCODE01`** or **`ACE_FMODE_SPRITE_32PX_ENCODE10`** (hardware treats both **32 px** encodings the same).
+- 64px basic sprite stripes: **`ACE_FMODE_SPRITE_64PX`** plus `spriteSetBitmap` on an AGA build.
+
+### Verification (WinUAE)
+
+1. Quickstart **A1200**, **ROM 3.1**, **more compatible** chipset.
+2. Run your build; confirm stripes align (no horizontal trash) when scrolling — wrong **FMODE** bits usually show as mis-sliced sprite data.
+3. Cross-check **`fmode`** in the debugger or a one-frame copper dump when debugging display lists.
 
 ## Main feature
 

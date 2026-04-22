@@ -10,9 +10,14 @@
  * @brief The basic sprite manager. Sets up the chained sprite list for each
  * of hardware sprite channels.
  *
+ * **AGA (`ACE_USE_AGA_FEATURES`):** Horizontal size is derived from `bitmapGetByteWidth()`
+ * (interleaved stripe). OCS/ECS builds allow up to **16px** wide; AGA builds allow up
+ * to **64px** — you must set viewport **`TAG_VPORT_FMODE`** so **sprite** bits (2–3 of
+ * `$DFF1FC`) match (`ACE_FMODE_SPRITE_*` / `ACE_FMODE_PACK()` in `ace/utils/extview.h`).
+ * Advanced sprites remain **16px and 32px only** (see `docs/programming/advancedsprites.md`).
+ *
  * @todo Add support for chained sprites - only one per channel atm
  * @todo Add support for attached (16-color) sprites?
- * @todo AGA differences?
  * @todo Separate spriteAdd/spriteRemove from spriteCreate/spriteDestroy
  * @todo Make allocations optional, allow using spriteInit(tSprite *) instead of Create/Destroy
  * @todo Allow using fragments of bitmap (specified Y offset) for sprite tiles support. How to solve metadata writing?
@@ -106,6 +111,8 @@ void spriteRemove(tSprite *pSprite);
  * @param pBitmap Bitmap to be used for display/control data. The bitmap must be
  * in 2BPP interleaved format as well as start and end with an empty line,
  * which will not be displayed but used for storing control data.
+ * On AGA, stripe width may be up to 64px; **FMODE** sprite width must match (see file
+ * header and `advancedsprites.md`).
  */
 void spriteSetBitmap(tSprite *pSprite, tBitMap *pBitmap);
 
@@ -172,18 +179,6 @@ void spriteProcess(tSprite *pSprite);
  * @see spriteProcess()
  */
 void spriteProcessChannel(UBYTE ubChannelIndex);
-
-
-/**
- * @brief Sets whether the sprite is an attached sprite.
- * Attached sprites are only available on odd sprite channels.
- *
- * 
- * @param isAttached Set to 1 to enable sprite attachment, otherwise set to 0.
- *
- * @see spriteProcess()
- */
-void spriteSetAttached(tSprite *pSprite, UBYTE isAttached);
 
 #ifdef __cplusplus
 }

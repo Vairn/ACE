@@ -181,15 +181,16 @@ void spriteSetBitmap(tSprite *pSprite, tBitMap *pBitmap) {
 		return;
 	}
 #if defined(ACE_USE_AGA_FEATURES)
-UBYTE uwMaxSpriteWidth = 8;
+	/** Interleaved plane stride: max 8 bytes => 64px; needs FMODE sprite bits = 64px (`ACE_FMODE_SPRITE_64PX`). */
+	UBYTE ubMaxByteWidth = 8;
 #else
-UBYTE uwMaxSpriteWidth = 2;
+	UBYTE ubMaxByteWidth = 2;
 #endif
 	UBYTE ubByteWidth = bitmapGetByteWidth(pBitmap);
-	if(ubByteWidth > uwMaxSpriteWidth) {
+	if(ubByteWidth > ubMaxByteWidth) {
 		logWrite(
-			"ERR: Unsupported sprite width: %hhu, expected %hhu\n",
-			ubByteWidth * 8, uwMaxSpriteWidth
+			"ERR: Unsupported sprite width: %u px (byte width %hhu), max %u px — set TAG_VPORT_FMODE / ACE_FMODE_SPRITE_* on AGA\n",
+			(unsigned)(ubByteWidth * 8), ubByteWidth, (unsigned)(ubMaxByteWidth * 8)
 		);
 		return;
 	}

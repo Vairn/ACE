@@ -79,12 +79,38 @@ typedef enum tTagVport {
 } tTagVport;
 
 #ifdef ACE_USE_AGA_FEATURES
-/** Bitplane fetch class: low 2 bits of FMODE ($DFF1FC). */
-#define ACE_BITPLANE_FMODE_2BYTE 0u
-#define ACE_BITPLANE_FMODE_BPL32 1u
-#define ACE_BITPLANE_FMODE_BPAGE 2u
-#define ACE_BITPLANE_FMODE_8BYTE 3u
-#define ACE_BITPLANE_FMODE_MASK  3u
+/**
+ * `$DFF1FC` FMODE — one register shared by Lisa bitplane DMA and sprite DMA.
+ *
+ * **Bits 0–1 — bitplane fetch chunk** (which fetch path the playfield uses):
+ * Match your bitmap stride / scroll manager expectations (`viewport_scroll`, etc.).
+ */
+#define ACE_FMODE_PLANE_FETCH_MASK 3u
+#define ACE_FMODE_PLANE_FETCH_WORD 0u /**< Word-sized fetches (smallest chunk). */
+#define ACE_FMODE_PLANE_FETCH_LONG 1u /**< Longword / "double" fetch path. */
+#define ACE_FMODE_PLANE_FETCH_PAGE 2u /**< Page / burst fetch path. */
+#define ACE_FMODE_PLANE_FETCH_QUAD 3u /**< Eight-byte / widest chunk (64-pixel fine scroll path with lores). */
+
+/**
+ * **Bits 2–3 — sprite DMA width** (how wide each sprite channel’s DMA is clocked).
+ * Hardware treats **%01** and **%10** in this 2-bit field the same (**32 px**); pick one encoding.
+ * @see https://jvaltane.kapsi.fi/amiga/howtocode/aga.html (Sprites / FMODE)
+ */
+#define ACE_FMODE_SPRITE_WIDTH_SHIFT 2u
+#define ACE_FMODE_SPRITE_WIDTH_MASK  (3u << ACE_FMODE_SPRITE_WIDTH_SHIFT)
+#define ACE_FMODE_SPRITE_16PX          (0u << ACE_FMODE_SPRITE_WIDTH_SHIFT)
+#define ACE_FMODE_SPRITE_32PX_ENCODE01 (1u << ACE_FMODE_SPRITE_WIDTH_SHIFT) /**< Field = %01 */
+#define ACE_FMODE_SPRITE_32PX_ENCODE10 (2u << ACE_FMODE_SPRITE_WIDTH_SHIFT) /**< Field = %10 */
+#define ACE_FMODE_SPRITE_64PX          (3u << ACE_FMODE_SPRITE_WIDTH_SHIFT)
+
+/**
+ * Build low byte of `ubFmode`: OR bitplane fetch (bits 0–1) with sprite width (bits 2–3).
+ * @param planeFetchBits  One of `ACE_FMODE_PLANE_FETCH_*` (masked to bits 0–1).
+ * @param spriteWidthBits One of `ACE_FMODE_SPRITE_*` (masked to bits 2–3).
+ */
+#define ACE_FMODE_PACK(planeFetchBits, spriteWidthBits)                                        \
+	((UBYTE)(((UBYTE)(planeFetchBits) & ACE_FMODE_PLANE_FETCH_MASK) |                           \
+	         ((UBYTE)(spriteWidthBits) & ACE_FMODE_SPRITE_WIDTH_MASK)))
 #endif
 
 /* Types */
@@ -176,7 +202,7 @@ typedef struct _tVPort {
 	// Color info
 	UBYTE ubBpp;        ///< Bitplane count
 #ifdef ACE_USE_AGA_FEATURES
-	/** Full $DFF1FC value; low two bits select bitplane fetch width (see ACE_BITPLANE_FMODE_*). */
+	/** Full $DFF1FC value: `ACE_FMODE_PACK(ACE_FMODE_PLANE_FETCH_*, ACE_FMODE_SPRITE_*)`. */
 	UBYTE ubFmode;
 #endif
 	

@@ -43,11 +43,11 @@ its features:
   facilitating large scrolls it manages drawing background for you using
   tilemaps. This is what you'll most likely want to use.
 
-### AGA wide fetch and scroll (`ACE_BITPLANE_FMODE_8BYTE`)
+### AGA wide fetch and scroll (`ACE_FMODE_PLANE_FETCH_QUAD`)
 
 On AGA, `TAG_VPORT_FMODE` sets `$DFF1FC`. The **low two bits** select bitplane
-fetch width (macros `ACE_BITPLANE_FMODE_*` in `ace/utils/extview.h`). With
-**`ACE_BITPLANE_FMODE_8BYTE`** (%11), lores playfields use **64-pixel** fine
+fetch width (macros `ACE_FMODE_PLANE_FETCH_*` in `ace/utils/extview.h`). With
+**`ACE_FMODE_PLANE_FETCH_QUAD`** (%11), lores playfields use **64-pixel** fine
 scroll (`BPLCON1`), and bitplane pointers move in **8-byte** steps over the
 bitmap. Simple and scroll buffer managers share **`viewport_scroll`** so **DDF**
 and **`BPLCON1`** / pointer math stay aligned. **Hires** keeps the usual

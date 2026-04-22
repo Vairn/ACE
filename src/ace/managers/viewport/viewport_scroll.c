@@ -19,13 +19,13 @@ UWORD viewportCalcDdfStep(const tView *pView, UBYTE ubFmode) {
 	UWORD uwQuad = (pView->uwWidth / 16) - 1;
 	UWORD uwDDFStep = uwQuad * 8;
 #ifdef ACE_USE_AGA_FEATURES
-	switch(ubFmode & ACE_BITPLANE_FMODE_MASK) {
-	case ACE_BITPLANE_FMODE_8BYTE:
+	switch(ubFmode & ACE_FMODE_PLANE_FETCH_MASK) {
+	case ACE_FMODE_PLANE_FETCH_QUAD:
 		uwDDFStep = uwQuad * 6;
 		break;
-	case ACE_BITPLANE_FMODE_2BYTE:
-	case ACE_BITPLANE_FMODE_BPL32:
-	case ACE_BITPLANE_FMODE_BPAGE:
+	case ACE_FMODE_PLANE_FETCH_WORD:
+	case ACE_FMODE_PLANE_FETCH_LONG:
+	case ACE_FMODE_PLANE_FETCH_PAGE:
 	default:
 		uwDDFStep = uwQuad * 8;
 		break;
@@ -42,7 +42,7 @@ void viewportCalcBplScrollX(
 ) {
 #ifdef ACE_USE_AGA_FEATURES
 	UBYTE ubAga64 =
-		((pVPort->ubFmode & ACE_BITPLANE_FMODE_MASK) == ACE_BITPLANE_FMODE_8BYTE) &&
+		((pVPort->ubFmode & ACE_FMODE_PLANE_FETCH_MASK) == ACE_FMODE_PLANE_FETCH_QUAD) &&
 		!(pVPort->eFlags & VP_FLAG_HIRES);
 #else
 	UBYTE ubAga64 = 0;
