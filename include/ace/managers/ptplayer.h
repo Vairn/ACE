@@ -15,7 +15,7 @@ extern "C" {
 
 #define PTPLAYER_VOLUME_MAX 64
 #define PTPLAYER_SFX_CHANNEL_ANY 0xFF
-#define PTPLAYER_MOD_SAMPLE_COUNT 31
+#define PTPLAYER_SAMPLE_HEADER_COUNT 31
 
 #include <ace/types.h>
 #include <ace/utils/bitmap.h>
@@ -43,7 +43,7 @@ typedef struct _tPtplayerSampleHeader {
 
 typedef struct _tPtplayerMod {
 	char szSongName[20];
-	tPtplayerSampleHeader pSampleHeaders[PTPLAYER_MOD_SAMPLE_COUNT];
+	tPtplayerSampleHeader pSampleHeaders[PTPLAYER_SAMPLE_HEADER_COUNT];
 	UBYTE ubArrangementLength; ///< Length of arrangement, not to be confused with
 	                           /// pattern count in file. Max 128.
 	UBYTE ubSongEndPos;
@@ -54,42 +54,28 @@ typedef struct _tPtplayerMod {
 	// MOD pattern/sample data follows
 
 	UBYTE *pPatterns;
-	UWORD *pSampleStarts[PTPLAYER_MOD_SAMPLE_COUNT];
 	ULONG ulPatternsSize;
-	UBYTE isOwningSamples;
+	UWORD *pSamples; ///< Raw data of all samples, next sample data starts directly after previous one.
+	ULONG ulSamplesSize;
 } tPtplayerMod;
 
 typedef struct tPtplayerSamplePack {
-	UBYTE ubSampleCount;
-	tPtplayerSfx pSamples[PTPLAYER_MOD_SAMPLE_COUNT];
+	ULONG ulSize;
+	UWORD *pData; ///< Raw data of all samples, next sample data starts directly after previous one.
 } tPtplayerSamplePack;
 
 typedef void (*tPtplayerCbSongEnd)(void);
-typedef void (*tPtplayerCbE8)(UBYTE ubE8);
 
 /**
  * @brief Install a CIA-B interrupt for calling _mt_music or mt_sfxonly.
  * The music module is replayed via _mt_music when _mt_Enable is non-zero.
  * Otherwise the interrupt handler calls mt_sfxonly to play sound effects only.
- *
- * @param isPal In CIA mode, Set to 1 on PAL configs, zero on NTSC.
  */
-void ptplayerCreate(UBYTE isPal);
+void ptplayerCreate(void);
 
 void ptplayerDestroy(void);
 
 void ptplayerProcess(void);
-
-/**
- * @brief Sets PAL/NTSC mode. Relevant in CIA-based playback mode.
- *
- * Note that each tSfx stores period calculated for mode which was set during
- * call to ptplayerSfxCreateFromFd(). You may need to correct their values
- * manually.
- *
- * @param isPal In CIA mode, Set to 1 on PAL configs, zero on NTSC.
- */
-void ptplayerSetPal(UBYTE isPal);
 
 /**
  * @brief Loads new MOD from file.
@@ -98,16 +84,7 @@ void ptplayerSetPal(UBYTE isPal);
  * @param szPath Path to .mod file.
  * @return Pointer to new MOD structure, initialized with file contents.
  */
-tPtplayerMod *ptplayerModCreateFromPath(const char *szPath);
-
-/**
- * @brief Loads new MOD from file.
- * @note This function may use OS.
- *
- * @param pFileMod Handle to the .mod file. Will be closed on function return.
- * @return Pointer to new MOD structure, initialized with file contents.
- */
-tPtplayerMod *ptplayerModCreateFromFd(tFile *pFileMod);
+tPtplayerMod *ptplayerModCreate(const char *szPath);
 
 /**
  * @brief Frees given MOD from memory.
@@ -124,7 +101,7 @@ void ptplayerModDestroy(tPtplayerMod *pMod);
  * Master volume is at 64 (maximum).
  *
  * @param pMod Pointer to MOD struct.
- * @param pExternalSamples When set to 0, the samples are assumed to be stored inside
+ * @param pSamples When set to 0, the samples are assumed to be stored inside
  * the MOD, after the patterns. Otherwise, uses samples from given samplepack.
  * @param uwInitialSongPos
  *
@@ -132,9 +109,10 @@ void ptplayerModDestroy(tPtplayerMod *pMod);
  * @see ptplayerStop()
  */
 void ptplayerLoadMod(
-	tPtplayerMod *pMod, tPtplayerSamplePack *pExternalSamples,
-	UWORD uwInitialSongPos
+	tPtplayerMod *pMod, tPtplayerSamplePack *pSamples, UWORD uwInitialSongPos
 );
+
+UBYTE ptplayerModIsCurrent(const tPtplayerMod *pMod);
 
 /**
  * @brief Stop playing current module.
@@ -229,24 +207,7 @@ void ptplayerSetSampleVolume(UBYTE ubSampleIndex, UBYTE ubVolume);
  * @see ptplayerSfxDestroy()
  * @see ptplayerSfxPlay()
  */
-tPtplayerSfx *ptplayerSfxCreateFromPath(const char *szPath, UBYTE isFast);
-
-/**
- * @brief Loads SFX from given file.
- * Note that this function sets SFX period based on currently set PAL/NTSC video
- * mode. If you plan to change it after loading SFX, be sure to adjust
- * the period value for new mode.
- * @note This function may use OS.
- *
- * @param pFileSfx Handle to the .sfx file. Will be closed on function return.
- * @param isFast Set to 1 if you wish to load SFX to FAST memory.
- * Useful for software-based audio-mixing, unusable with ptplayer.
- * @return Newly loaded SFX.
- *
- * @see ptplayerSfxDestroy()
- * @see ptplayerSfxPlay()
- */
-tPtplayerSfx *ptplayerSfxCreateFromFd(tFile *pFileSfx, UBYTE isFast);
+tPtplayerSfx *ptplayerSfxCreateFromFile(const char *szPath, UBYTE isFast);
 
 /**
  * @brief Destroys given SFX, freeing its resources to OS.
@@ -254,7 +215,7 @@ tPtplayerSfx *ptplayerSfxCreateFromFd(tFile *pFileSfx, UBYTE isFast);
  *
  * @param pSfx SFX to be destroyed.
  *
- * @see ptplayerSfxCreateFromFd()
+ * @see ptplayerSfxCreateFromFile()
  */
 void ptplayerSfxDestroy(tPtplayerSfx *pSfx);
 
@@ -328,16 +289,7 @@ UBYTE ptplayerSfxLengthInFrames(const tPtplayerSfx *pSfx);
  * @param szPath Path to sample pack to be loaded.
  * @return Pointer to newly allocated sample pack, zero on failure.
  */
-tPtplayerSamplePack *ptplayerSampleDataCreateFromPath(const char *szPath);
-
-/**
- * @brief Loads MOD sample pack from file at given path.
- * @note This function may use OS.
- *
- * @param pFileSamples Handle to the sample pack file to be loaded. Will be closed on function return.
- * @return Pointer to newly allocated sample pack, zero on failure.
- */
-tPtplayerSamplePack *ptplayerSampleDataCreateFromFd(tFile *pFileSamples);
+tPtplayerSamplePack *ptplayerSamplePackCreate(const char *szPath);
 
 /**
  * @brief Destroys given sample pack, freeing its resources to OS.
@@ -346,14 +298,6 @@ tPtplayerSamplePack *ptplayerSampleDataCreateFromFd(tFile *pFileSamples);
  * @param pSamplePack Sample pack to be destroyed.
  */
 void ptplayerSamplePackDestroy(tPtplayerSamplePack *pSamplePack);
-
-/**
- * @brief Sets the function to call on parsing the E8 command.
- *
- * @param cbOnE8 Function to be called. E8 argument nibble is passed
- * as argument. Set to zero if not needed.
- */
-void ptplayerSetE8Callback(tPtplayerCbE8 cbOnE8);
 
 #ifdef __cplusplus
 }

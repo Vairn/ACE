@@ -23,7 +23,7 @@ extern "C" {
 
 /* Types */
 
-#ifdef AMIGA
+#if defined(AMIGA)
 #include <clib/graphics_protos.h> // BitMap etc
 typedef struct BitMap tBitMap;
 #else
@@ -33,7 +33,7 @@ typedef struct _tBitMap {
 	UBYTE Flags;
 	UBYTE Depth;
 	UWORD pad;
-	UWORD *Planes[8];
+	UBYTE *Planes[8];
 } tBitMap;
 #define BMF_CLEAR       (1 << 0)
 #define BMF_DISPLAYABLE (1 << 1)

@@ -10,12 +10,10 @@
 // - http://coppershade.org/articles/More!/Topics/Protracker_File_Format/
 
 #include <ace/managers/ptplayer.h>
+#include <ace/managers/ptplayer_private.h>
 #include <ace/managers/log.h>
 #include <ace/managers/system.h>
 #include <ace/utils/custom.h>
-#include <ace/utils/disk_file.h>
-#include <hardware/intbits.h>
-#include <hardware/dmabits.h>
 
 //----------------------------------------------------------------------- CONFIG
 
@@ -37,8 +35,6 @@
 
 //---------------------------------------------------------------------- DEFINES
 
-#define PTPLAYER_SUPPORTED_SAMPLEPACK_VERSION 2
-
 /**
  * @brief Minimum safe CIA timer ticks count after which Paula channel regs can
  * be set for next sample.
@@ -58,16 +54,6 @@
  * when playing the lowest note from the lowest Protracker octave.
  */
 #define TIMERB_TICKS (576)
-
-// Patterns - each has 64 rows, each row has 4 notes, each note has 4 bytes.
-#define MOD_ROWS_IN_PATTERN 64
-#define MOD_NOTES_PER_ROW 4
-#define MOD_BYTES_PER_NOTE 4
-// Length of single pattern.
-#define MOD_PATTERN_BYTE_SIZE (MOD_ROWS_IN_PATTERN * MOD_NOTES_PER_ROW * MOD_BYTES_PER_NOTE)
-
-// Size of period table.
-#define MOD_PERIOD_TABLE_LENGTH 36
 
 /**
  * @brief Delay in CIA-ticks, which guarantees that at least one Audio-DMA
@@ -936,8 +922,6 @@ static volatile UBYTE s_isPendingPlay, s_isPendingSetRep, s_isPendingDmaOn;
 #endif
 static UBYTE s_isRepeat;
 static tPtplayerCbSongEnd s_cbSongEnd;
-static tPtplayerCbE8 s_cbOnE8;
-static UBYTE s_isPal;
 
 #if defined(PTPLAYER_USE_AUDIO_INT_HANDLERS)
 /**
@@ -976,8 +960,8 @@ static volatile UBYTE mt_Enable = 0;
 static volatile UBYTE s_isNextTimerBSetRep;
 
 static tChannelStatus mt_chan[4];
-static UWORD *mt_SampleStarts[PTPLAYER_MOD_SAMPLE_COUNT]; ///< Start address of each sample
-static tPtplayerMod *s_pCurrentMod; ///< Currently played MOD.
+static UWORD *mt_SampleStarts[31]; ///< Start address of each sample
+static tPtplayerMod *mt_mod; ///< Currently played MOD.
 static ULONG mt_timerval; ///< Base interrupt frequency of CIA-B timer A used to advance the song. Equals 125*50Hz.
 static const UBYTE * mt_MasterVolTab;
 static UWORD mt_PatternPos;
@@ -1001,6 +985,8 @@ static UBYTE mt_SilCntValid;
  * to indicate that they are busy.
  */
 static UWORD mt_dmaon = 0;
+
+static tPtplayerMod *s_pModCurr;
 
 static void clearAudioDone(void) {
 #if defined(PTPLAYER_USE_AUDIO_INT_HANDLERS)
@@ -1133,7 +1119,7 @@ static void ptSongStep(void) {
 	UBYTE ubNextPos = (mt_SongPos + 1) & 0x7F;
 
 	// End of song reached?
-	if(ubNextPos >= s_pCurrentMod->ubArrangementLength) {
+	if(ubNextPos >= mt_mod->ubArrangementLength) {
 		ubNextPos = 0;
 		if(!s_isRepeat) {
 			ptplayerEnableMusic(0);
@@ -1276,7 +1262,7 @@ static void mt_playvoice(
 		--uwSampleIdx;
 		// Read length, volume and repeat from sample info table
 		UWORD *pSampleStart = mt_SampleStarts[uwSampleIdx];
-		tPtplayerSampleHeader *pSampleDef = &s_pCurrentMod->pSampleHeaders[uwSampleIdx];
+		tPtplayerSampleHeader *pSampleDef = &mt_mod->pSampleHeaders[uwSampleIdx];
 		UWORD uwSampleLength = pSampleDef->uwLength;
 		if(!uwSampleLength) {
 			// Use the first two bytes from the first sample for empty samples
@@ -1572,8 +1558,8 @@ static void mt_music(void) {
 		mt_Counter = 0;
 		if(mt_PattDelTime2 <= 0) {
 			// determine pointer to current pattern line
-			UBYTE *pPatternData = s_pCurrentMod->pPatterns;
-			UBYTE *pArrangement = s_pCurrentMod->pArrangement;
+			UBYTE *pPatternData = mt_mod->pPatterns;
+			UBYTE *pArrangement = mt_mod->pArrangement;
 			UBYTE ubPatternIdx = pArrangement[mt_SongPos];
 			UBYTE *pCurrentPattern = &pPatternData[ubPatternIdx * 1024];
 			tModVoice *pLineVoices = (tModVoice*)&pCurrentPattern[mt_PatternPos];
@@ -1652,6 +1638,11 @@ static void resetChannel(tChannelStatus *pChannel) {
 	pChannel->n_gliss = 0;
 }
 
+UBYTE ptplayerModIsCurrent(const tPtplayerMod *pMod) {
+	UBYTE isCurrent = (s_pModCurr == pMod);
+	return isCurrent;
+}
+
 // Stop playing current module.
 void ptplayerStop(void) {
 	ptplayerEnableMusic(0);
@@ -1661,7 +1652,7 @@ void ptplayerStop(void) {
 		}
 		resetChannel(&mt_chan[i]);
 	}
-	s_pCurrentMod = 0;
+	s_pModCurr = 0;
 
 	// Free the channels taken by SFX.
 	// Typically they would release themselves but turning off DMA prevents this.
@@ -1695,7 +1686,6 @@ static void mt_reset(void) {
 	mt_Speed = 6;
 	mt_Counter = 0;
 	mt_PatternPos = 0;
-	mt_SongPos = 0;
 	mt_PattDelTime = 0;
 	mt_PattDelTime2 = 0;
 	mt_PBreakPos = 0;
@@ -1760,11 +1750,10 @@ void ptplayerDestroy(void) {
 #endif
 }
 
-void ptplayerCreate(UBYTE isPal) {
+void ptplayerCreate(void) {
 	s_isRepeat = 1;
 	s_cbSongEnd = 0;
-	s_cbOnE8 = 0;
-	s_pCurrentMod = 0;
+	s_pModCurr = 0;
 	ptplayerEnableMusic(0);
 #if defined(PTPLAYER_USE_AUDIO_INT_HANDLERS)
 	for(UBYTE i = sizeof(s_pAudioChannelPendingDisable); i--;) {
@@ -1788,18 +1777,7 @@ void ptplayerCreate(UBYTE isPal) {
 	systemSetInt(INTB_AUD3, onAudio, (void*)3);
 #endif
 
-	ptplayerSetPal(isPal);
-	mt_MasterVolTab = MasterVolTab[64];
-	for(UBYTE i = 0; i < 4; ++i) {
-		mt_chan[i].isEnabledForPlayer = 1;
-	}
-	mt_reset();
-}
-
-void ptplayerSetPal(UBYTE isPal) {
-	// determine if 02 clock for timers is based on PAL or NTSC
-	s_isPal = isPal;
-	if(s_isPal) {
+	if(systemIsPal()) {
 		// Fcolor = 4.43361825 MHz (PAL color carrier frequency)
 		// CPU Clock = Fcolor * 1.6 = 7.0937892 MHz
 		// CIA Clock = Cpu Clock / 10 = 709.37892 kHz
@@ -1810,64 +1788,63 @@ void ptplayerSetPal(UBYTE isPal) {
 	else {
 		mt_timerval = 1789773;
 	}
+
+	mt_MasterVolTab = MasterVolTab[64];
+	for(UBYTE i = 0; i < 4; ++i) {
+		mt_chan[i].isEnabledForPlayer = 1;
+	}
+	mt_reset();
 }
 
 void ptplayerLoadMod(
-	tPtplayerMod *pMod, tPtplayerSamplePack *pExternalSamples,
-	UWORD uwInitialSongPos
+	tPtplayerMod *pMod, tPtplayerSamplePack *pSamples, UWORD uwInitialSongPos
 ) {
 	logBlockBegin(
-		"ptplayerLoadMod(pMod: %p, pExternalSamples: %p, uwInitialSongPos: %hu)",
-		pMod, pExternalSamples, uwInitialSongPos
+		"ptplayerInit(pMod: %p, pSamples: %p, uwInitialSongPos: %hu)",
+		pMod, pSamples, uwInitialSongPos
 	);
 
 	// Initialize new module.
 	// Reset speed to 6, tempo to 125 and start at given song position.
 	// Master volume is at 64 (maximum).
-	s_pCurrentMod = pMod;
+	mt_mod = pMod;
 	logWrite(
 		"Song name: '%s', arrangement length: %hhu, end pos: %hhu\n",
-		s_pCurrentMod->szSongName, s_pCurrentMod->ubArrangementLength, s_pCurrentMod->ubSongEndPos
+		mt_mod->szSongName, mt_mod->ubArrangementLength, mt_mod->ubSongEndPos
 	);
 
 	// set initial song position
 	if(uwInitialSongPos >= 950) {
 		uwInitialSongPos = 0;
 	}
+	mt_SongPos = uwInitialSongPos;
 
 	// sample data location is given?
-	if(pExternalSamples) {
-		logWrite("Using sample data from: %p\n", pExternalSamples);
-		for(UBYTE i = 0; i < PTPLAYER_MOD_SAMPLE_COUNT; ++i) {
-			mt_SampleStarts[i] = pExternalSamples->pSamples[i].pData;
-		};
-	}
-	else {
-		for(UBYTE i = 0; i < PTPLAYER_MOD_SAMPLE_COUNT; ++i) {
-			mt_SampleStarts[i] = pMod->pSampleStarts[i];
-		}
-	}
+	UWORD *pSampleData = pSamples ? pSamples->pData : pMod->pSamples;
+	logWrite("Using sample data from: %p\n", pSampleData);
 
-	for(UBYTE i = 0; i < PTPLAYER_MOD_SAMPLE_COUNT; ++i) {
-		const tPtplayerSampleHeader *pHeader = &s_pCurrentMod->pSampleHeaders[i];
-		if(s_pCurrentMod->pSampleHeaders[i].uwLength > 0) {
-			// Make sure each sample starts with two 0-bytes
-			mt_SampleStarts[i][0] = 0;
+	// Save start address of each sample
+	ULONG ulOffs = 0;
+	for(UBYTE i = 0; i < 31; ++i) {
+		mt_SampleStarts[i] = &pSampleData[ulOffs];
+		if(mt_mod->pSampleHeaders[i].uwLength > 0) {
 			logWrite(
 				"Sample %hhu name: '%.*s', word length: %hu, start: %p, repeat offs: %hu, repeat len:%hu\n",
-				i, 22, pHeader->szName, pHeader->uwLength,
-				mt_SampleStarts[i], pHeader->uwRepeatOffs, pHeader->uwRepeatLength
+				i, 22, mt_mod->pSampleHeaders[i].szName, mt_mod->pSampleHeaders[i].uwLength,
+				mt_SampleStarts[i], mt_mod->pSampleHeaders[i].uwRepeatOffs, mt_mod->pSampleHeaders[i].uwRepeatLength
 			);
-			if(pHeader->uwRepeatOffs + pHeader->uwRepeatLength > pHeader->uwLength) {
-				logWrite("ERR: Repeat offs + repeat length > length\n");
-			}
+
+			// Make sure each sample starts with two 0-bytes
+			mt_SampleStarts[i][0] = 0;
 		}
-	}
+
+		// Go to next sample
+		ulOffs += mt_mod->pSampleHeaders[i].uwLength;
+	};
 
 	mt_reset();
-	s_pCurrentMod = pMod;
-	mt_SongPos = uwInitialSongPos;
-	logBlockEnd("ptplayerLoadMod()");
+	s_pModCurr = pMod;
+	logBlockEnd("ptplayerInit()");
 }
 
 void ptplayerSetMusicChannelMask(UBYTE ChannelMask) {
@@ -2311,7 +2288,7 @@ static void mt_pernop(
 
 static void mt_volchange(
 	UBYTE ubNewVolume,
-	UNUSED_ARG tChannelStatus *pChannelData, volatile tChannelRegs *pChannelReg
+	tChannelStatus *pChannelData, volatile tChannelRegs *pChannelReg
 ) {
 	// cmd C x y (xy = new volume)
 	if(ubNewVolume > 64) {
@@ -2467,9 +2444,6 @@ static void mt_e8(
 ) {
 	// cmd 0x0E'8X (x = trigger value)
 	mt_E8Trigger = ubArg;
-	if(s_cbOnE8) {
-		s_cbOnE8(ubArg);
-	}
 }
 
 static void ptDoRetrigger(
@@ -2713,70 +2687,6 @@ static const tPreFx prefx_tab[16] = {
 	[0xA ... 0xF] = set_period,
 };
 
-/**
- * @brief Get the Paula's Clock Constant.
- *
- * http://amigadev.elowar.com/read/ADCD_2.1/Hardware_Manual_guide/node00DE.html
- *
- * @return The current clock constant, dependent on PAL/NTSC mode.
- */
-static inline ULONG getClockConstant(void) {
-	return s_isPal ? 3546895 : 3579545;
-}
-
-static void ptplayerSfxDecompress(
-	UBYTE *pCompressed, UBYTE *pDecompressed, ULONG ulDecompressedSize
-) {
-	UBYTE *pRead = pCompressed;
-	const UBYTE *pDecompressedEnd = &pDecompressed[ulDecompressedSize];
-	ULONG ulCtl;
-	BYTE bLastSample = 0;
-	while(1) {
-		ulCtl = *(pRead++);
-		ulCtl = (ulCtl << 8) | *(pRead++);
-		ulCtl = (ulCtl << 8) | *(pRead++);
-		ulCtl = (ulCtl << 8) | *(pRead++);
-		for(UBYTE i = 16; i--;) {
-			UBYTE ubCtl = ulCtl & 0b11;
-			if(ubCtl == 0) {
-				*(pDecompressed++) = bLastSample;
-			}
-			else if(ubCtl == 0b11) {
-				bLastSample = *(pRead++);
-				*(pDecompressed++) = bLastSample;
-			}
-			else {
-				UBYTE ubNibbles = *(pRead++);
-
-				if(ubCtl == 0b01) {
-					bLastSample += (ubNibbles & 0xF) + 1;
-				}
-				else {
-					bLastSample -= (ubNibbles & 0xF) + 1;
-				}
-				*(pDecompressed++) = bLastSample;
-
-				ubNibbles >>= 4;
-				ulCtl >>= 2;
-				--i;
-				ubCtl = ulCtl & 0b11;
-				if(ubCtl == 0b01) {
-					bLastSample += ubNibbles + 1;
-				}
-				else {
-					bLastSample -= ubNibbles + 1;
-				}
-				*(pDecompressed++) = bLastSample;
-			}
-
-			if(pDecompressed >= pDecompressedEnd) {
-				return;
-			}
-			ulCtl >>= 2;
-		}
-	}
-}
-
 void ptplayerProcess(void) {
 #if defined(PTPLAYER_DEFER_INTERRUPTS)
 	if(s_isPendingPlay) {
@@ -2795,8 +2705,8 @@ void ptplayerProcess(void) {
 }
 
 const tModVoice *ptplayerGetCurrentVoices(void) {
-	UBYTE *pPatternData = s_pCurrentMod->pPatterns;
-	UBYTE *pArrangement = s_pCurrentMod->pArrangement;
+	UBYTE *pPatternData = mt_mod->pPatterns;
+	UBYTE *pArrangement = mt_mod->pArrangement;
 	UBYTE ubPatternIdx = pArrangement[mt_SongPos];
 	UBYTE *pCurrentPattern = &pPatternData[ubPatternIdx * 1024];
 	tModVoice *pLineVoices = (tModVoice*)&pCurrentPattern[mt_PatternPos];
@@ -2822,213 +2732,20 @@ void ptplayerReserveChannelsForMusic(UBYTE ubChannelCount) {
 }
 
 void ptplayerSetSampleVolume(UBYTE ubSampleIndex, UBYTE ubVolume) {
-	s_pCurrentMod->pSampleHeaders[ubSampleIndex].ubVolume = ubVolume;
-}
-
-tPtplayerMod *ptplayerModCreateFromPath(const char *szPath) {
-	return ptplayerModCreateFromFd(diskFileOpen(szPath, DISK_FILE_MODE_READ, 1));
-}
-
-tPtplayerMod *ptplayerModCreateFromFd(tFile *pFileMod) {
-	logBlockBegin("ptplayerModCreateFromFd(pFileMod: %p)", pFileMod);
-
-	tPtplayerMod *pMod = 0;
-	LONG lSize = fileGetSize(pFileMod);
-	if(lSize <= 0) {
-		logWrite("ERR: File doesn't exist\n");
-		goto fail;
-	}
-
-	pMod = memAllocFastClear(sizeof(*pMod));
-	if(!pMod) {
-		return 0;
-	}
-
-	// Read header
-	fileRead(pFileMod, pMod->szSongName, sizeof(pMod->szSongName));
-	// TODO: read samples data field by field for portability
-	fileRead(pFileMod, pMod->pSampleHeaders, sizeof(pMod->pSampleHeaders));
-	fileRead(pFileMod, &pMod->ubArrangementLength, sizeof(pMod->ubArrangementLength));
-	fileRead(pFileMod, &pMod->ubSongEndPos, sizeof(pMod->ubSongEndPos));
-	fileRead(pFileMod, pMod->pArrangement, sizeof(pMod->pArrangement));
-	fileRead(pFileMod, pMod->pFileFormatTag, sizeof(pMod->pFileFormatTag));
-
-	// Get number of highest pattern
-	UBYTE ubLastPattern = 0;
-	for(UBYTE i = 0; i < 127; ++i) {
-		if(pMod->pArrangement[i] > ubLastPattern) {
-			ubLastPattern = pMod->pArrangement[i];
-		}
-	}
-	UBYTE ubPatternCount = ubLastPattern + 1;
-	logWrite("Pattern count: %hhu\n", ubPatternCount);
-
-	// Read pattern data
-	pMod->ulPatternsSize = (ubPatternCount * MOD_PATTERN_BYTE_SIZE);
-	pMod->pPatterns = memAllocFast(pMod->ulPatternsSize);
-	if(!pMod->pPatterns) {
-		logWrite("ERR: Couldn't allocate memory for pattern data");
-		goto fail;
-	}
-	fileRead(pFileMod, pMod->pPatterns, pMod->ulPatternsSize);
-
-	// Read sample data
-	ULONG ulSampleStartPos = fileGetPos(pFileMod);
-	ULONG ulSamplesSize = lSize - ulSampleStartPos;
-	if(ulSamplesSize) {
-		for(UBYTE ubSampleIndex = 0; ubSampleIndex < PTPLAYER_MOD_SAMPLE_COUNT; ++ubSampleIndex) {
-			ULONG ulSampleDataLength = pMod->pSampleHeaders[ubSampleIndex].uwLength * sizeof(UWORD);
-			if(ulSampleDataLength) {
-				pMod->pSampleStarts[ubSampleIndex] = memAllocChip(ulSampleDataLength);
-				fileRead(pFileMod, pMod->pSampleStarts[ubSampleIndex], ulSampleDataLength);
-			}
-		}
-		pMod->isOwningSamples = 1;
-	}
-	else {
-		pMod->isOwningSamples = 0;
-		logWrite("MOD has no samples - be sure to pass sample pack to ptplayer\n");
-	}
-
-	fileClose(pFileMod);
-	logBlockEnd("ptplayerModCreateFromFd()");
-	return pMod;
-fail:
-	if(pMod) {
-		if(pMod->pPatterns) {
-			memFree(pMod->pPatterns, pMod->ulPatternsSize);
-		}
-		if(pMod->isOwningSamples) {
-			for(UBYTE ubSampleIndex = 0; ubSampleIndex < PTPLAYER_MOD_SAMPLE_COUNT; ++ubSampleIndex) {
-				ULONG ulSampleDataLength = pMod->pSampleHeaders[ubSampleIndex].uwLength * sizeof(UWORD);
-				if(ulSampleDataLength) {
-					memFree(pMod->pSampleStarts[ubSampleIndex], ulSampleDataLength);
-				}
-			}
-		}
-		memFree(pMod, sizeof(*pMod));
-	}
-
-	fileClose(pFileMod);
-	logBlockEnd("ptplayerModCreateFromFd()");
-	return 0;
-}
-
-void ptplayerModDestroy(tPtplayerMod *pMod) {
-	if(s_pCurrentMod == pMod) {
-		ptplayerStop();
-	}
-	memFree(pMod->pPatterns, pMod->ulPatternsSize);
-	if(pMod->isOwningSamples) {
-		for(UBYTE ubSampleIndex = 0; ubSampleIndex < PTPLAYER_MOD_SAMPLE_COUNT; ++ubSampleIndex) {
-			ULONG ulSampleDataLength = pMod->pSampleHeaders[ubSampleIndex].uwLength * sizeof(UWORD);
-			if(ulSampleDataLength) {
-				memFree(pMod->pSampleStarts[ubSampleIndex], ulSampleDataLength);
-			}
-		}
-	}
-	memFree(pMod, sizeof(*pMod));
+	mt_mod->pSampleHeaders[ubSampleIndex].ubVolume = ubVolume;
 }
 
 //-------------------------------------------------------------------------- SFX
 
-tPtplayerSfx *ptplayerSfxCreateFromPath(const char *szPath, UBYTE isFast) {
-	return ptplayerSfxCreateFromFd(diskFileOpen(szPath, DISK_FILE_MODE_READ, 1), isFast);
-}
-
-tPtplayerSfx *ptplayerSfxCreateFromFd(tFile *pFileSfx, UBYTE isFast)
-{
-	systemUse();
-	logBlockBegin("ptplayerSfxCreateFromFd(pFileSfx: %p, isFast: %hhu)", pFileSfx, isFast);
-	tPtplayerSfx *pSfx = 0;
-	if(!pFileSfx) {
-		logWrite("ERR: Null file handle\n");
-		goto fail;
-	}
-
-	pSfx = memAllocFastClear(sizeof(*pSfx));
-	if(!pSfx) {
-		goto fail;
-	}
-	UBYTE ubVersion;
-	fileRead(pFileSfx, &ubVersion, sizeof(ubVersion));
-	if(ubVersion == 2) {
-		fileRead(pFileSfx, &pSfx->uwWordLength, sizeof(pSfx->uwWordLength));
-		ULONG ulByteSize = pSfx->uwWordLength * sizeof(UWORD);
-
-		UWORD uwSampleRateHz;
-		fileRead(pFileSfx, &uwSampleRateHz, sizeof(uwSampleRateHz));
-		pSfx->uwPeriod = (getClockConstant() + uwSampleRateHz/2) / uwSampleRateHz;
-		ULONG ulCompressedSize;
-		fileRead(pFileSfx, &ulCompressedSize, sizeof(ulCompressedSize));
-		logWrite(
-			"Length: %lu, compressed: %lu, sample rate: %hu, period: %hu\n",
-			ulByteSize, ulCompressedSize, uwSampleRateHz, pSfx->uwPeriod
-		);
-
-		pSfx->pData = isFast ? memAllocFast(ulByteSize) : memAllocChip(ulByteSize);
-		if(!pSfx->pData) {
-			goto fail;
-		}
-
-		if(ulCompressedSize) {
-			UBYTE *pCompressed = memAllocFast(ulByteSize);
-			fileRead(pFileSfx, pCompressed, ulCompressedSize);
-			ptplayerSfxDecompress(pCompressed, (UBYTE*)pSfx->pData, ulByteSize);
-			memFree(pCompressed, ulByteSize);
-		}
-		else {
-			fileRead(pFileSfx, pSfx->pData, ulByteSize);
-		}
-
-		// Check if pData[0] is zeroed-out - it should be because after sfx playback
-		// ptplayer sets the channel playback to looped first word. This should
-		// be done on sfx converter side. If your samples are humming after playback,
-		// fix your custom conversion tool or use latest ACE tools!
-		if(pSfx->pData[0] != 0) {
-			logWrite("WARN: SFX's first word isn't zeroed-out - won't work properly with ptplayer\n");
+void muteChannelsPlayingSfx(const tPtplayerSfx *pSfx) {
+	for(UBYTE ubChannel = 0; ubChannel < 4; ++ubChannel) {
+		if(mt_chan[ubChannel].n_sfxptr == pSfx->pData) {
+			// ptplayer doesn't mute its channels after sfx playback to save cycles
+			logWrite("channel %hhu is still using the sample - muting...\n", ubChannel);
+			g_pCustom->aud[ubChannel].ac_vol = 0;
+			break;
 		}
 	}
-	else {
-		logWrite("ERR: Unknown sample format version: %hhu\n", ubVersion);
-		goto fail;
-	}
-
-	fileClose(pFileSfx);
-	logBlockEnd("ptplayerSfxCreateFromFd()");
-	systemUnuse();
-	return pSfx;
-
-fail:
-	if(pFileSfx) {
-		fileClose(pFileSfx);
-	}
-	ptplayerSfxDestroy(pSfx);
-	logBlockEnd("ptplayerSfxCreateFromFd()");
-	systemUnuse();
-	return 0;
-}
-
-void ptplayerSfxDestroy(tPtplayerSfx *pSfx) {
-	logBlockBegin("ptplayerSfxDestroy(pSfx: %p)", pSfx);
-	if(pSfx) {
-		for(UBYTE ubChannel = 0; ubChannel < 4; ++ubChannel) {
-			if(mt_chan[ubChannel].n_sfxptr == pSfx->pData) {
-				// ptplayer doesn't mute its channels after sfx playback to save cycles
-				logWrite("channel %hhu is still using the sample - muting...\n", ubChannel);
-				g_pCustom->aud[ubChannel].ac_vol = 0;
-				break;
-			}
-		}
-
-		systemUse();
-		if(pSfx->pData) {
-			memFree(pSfx->pData, pSfx->uwWordLength * sizeof(UWORD));
-		}
-		memFree(pSfx, sizeof(*pSfx));
-		systemUnuse();
-	}
-	logBlockEnd("ptplayerSfxDestroy()");
 }
 
 /**
@@ -3076,7 +2793,7 @@ void ptplayerSfxStopOnChannel(UBYTE ubChannel) {
 void ptplayerSfxPlayLooped(
 	const tPtplayerSfx *pSfx, UBYTE ubChannel, UBYTE ubVolume
 ) {
-	if(memType(pSfx->pData) == MEMF_FAST) {
+	if(!memIsChip(pSfx->pData)) {
 		logWrite("ERR: ptplayer only supports samples located in CHIP mem\n");
 	}
 	g_pCustom->intena = INTF_INTEN;
@@ -3088,7 +2805,7 @@ void ptplayerSfxPlayLooped(
 void ptplayerSfxPlay(
 	const tPtplayerSfx *pSfx, UBYTE ubChannel, UBYTE ubVolume, UBYTE ubPriority
 ) {
-	if(memType(pSfx->pData) == MEMF_FAST) {
+	if(!memIsChip(pSfx->pData)) {
 		logWrite("ERR: ptplayer only supports samples located in CHIP mem\n");
 	}
 	g_pCustom->intena = INTF_INTEN;
@@ -3105,7 +2822,7 @@ void ptplayerSfxPlay(
 	}
 
 	// Did we already calculate the n_freecnt values for all channels?
-	if(!mt_SilCntValid && s_pCurrentMod) {
+	if(!mt_SilCntValid && mt_mod) {
 		// Look at the next 8 pattern steps to find the longest sequence
 		// of silence (no new note or instrument).
 		UBYTE ubSteps = 8;
@@ -3123,15 +2840,15 @@ void ptplayerSfxPlay(
 		mt_chan[3].n_freecnt = 0;
 
 		// get pattern pointer
-		UBYTE *pPatterns = s_pCurrentMod->pPatterns;
+		UBYTE *pPatterns = mt_mod->pPatterns;
 
 		UBYTE ubSongPos = mt_SongPos;
 		UWORD uwPatternPos = mt_PatternPos;
 		UBYTE isEnd = 0;
 		UBYTE *pPatternStart = &pPatterns[
-			s_pCurrentMod->pArrangement[ubSongPos] * MOD_PATTERN_BYTE_SIZE
+			mt_mod->pArrangement[ubSongPos] * MOD_PATTERN_LENGTH
 		];
-		tModVoice *pPatternEnd = (tModVoice*)(pPatternStart + MOD_PATTERN_BYTE_SIZE);
+		tModVoice *pPatternEnd = (tModVoice*)(pPatternStart + MOD_PATTERN_LENGTH);
 		tModVoice *pPatternPos = (tModVoice*)(pPatternStart + uwPatternPos);
 		do {
 			UBYTE ubFreeChannelCnt = 4;
@@ -3157,13 +2874,13 @@ void ptplayerSfxPlay(
 			if(!isEnd && pPatternPos >= pPatternEnd) {
 				uwPatternPos = 0;
 				ubSongPos = (mt_SongPos + 1) & 127;
-				if(ubSongPos >= s_pCurrentMod->ubArrangementLength) {
+				if(ubSongPos >= mt_mod->ubArrangementLength) {
 					ubSongPos = 0;
 				}
 				pPatternStart = &pPatterns[
-					s_pCurrentMod->pArrangement[ubSongPos] * MOD_PATTERN_BYTE_SIZE
+					mt_mod->pArrangement[ubSongPos] * MOD_PATTERN_LENGTH
 				];
-				pPatternEnd = (tModVoice*)(pPatternStart + MOD_PATTERN_BYTE_SIZE);
+				pPatternEnd = (tModVoice*)(pPatternStart + MOD_PATTERN_LENGTH);
 				pPatternPos = (tModVoice*)pPatternStart;
 			}
 		} while(!isEnd);
@@ -3274,98 +2991,48 @@ void ptplayerConfigureSongRepeat(UBYTE isRepeat, tPtplayerCbSongEnd cbSongEnd) {
 	s_cbSongEnd = cbSongEnd;
 }
 
-UBYTE ptplayerSfxLengthInFrames(const tPtplayerSfx *pSfx) {
-	// Get rounded sampling rate.
-	UWORD uwSamplingRateHz = (getClockConstant() + (pSfx->uwPeriod / 2)) / pSfx->uwPeriod;
-	// Get frame count - round it up.
-	UWORD uwFrameCount = (pSfx->uwWordLength * 2 * 50 + uwSamplingRateHz - 1) / uwSamplingRateHz;
-	return uwFrameCount;
-}
-
-tPtplayerSamplePack *ptplayerSampleDataCreateFromPath(const char *szPath) {
-	return ptplayerSampleDataCreateFromFd(diskFileOpen(szPath, DISK_FILE_MODE_READ, 1));
-}
-
-tPtplayerSamplePack *ptplayerSampleDataCreateFromFd(tFile *pFileSamples)
-{
-	logBlockBegin("ptplayerSampleDataCreateFromFd(pFileSamples: %p)", pFileSamples);
+tPtplayerSamplePack *ptplayerSamplePackCreate(const char *szPath) {
+	// TODO: add some kind of header for the file, read each sample separately
+	logBlockBegin("ptplayerSamplePackCreate(szPath: '%s')", szPath);
 	systemUse();
-
-	UBYTE ubVersion;
 	tPtplayerSamplePack *pSamplePack = 0;
-	fileRead(pFileSamples, &ubVersion, sizeof(ubVersion));
-	if(ubVersion != PTPLAYER_SUPPORTED_SAMPLEPACK_VERSION) {
-		// ACE only supports most up to date file version to limit its size
-		logWrite(
-			"ERR: Unsupported sample pack format version: %hu, expected %hu",
-			ubVersion, PTPLAYER_SUPPORTED_SAMPLEPACK_VERSION
-		);
+	LONG lSize = fileGetSize(szPath);
+	if(lSize <= 0) {
+		logWrite("ERR: Invalid file size. File exists?\n");
 		goto fail;
 	}
 
 	pSamplePack = memAllocFastClear(sizeof(*pSamplePack));
-	if(!pSamplePack) {
+	logWrite("Addr: %p\n", pSamplePack);
+	pSamplePack->ulSize = lSize;
+	pSamplePack->pData = memAllocChip(pSamplePack->ulSize);
+	if(!pSamplePack->pData) {
 		goto fail;
 	}
-	logWrite("Addr: %p\n", pSamplePack);
-	fileRead(pFileSamples, &pSamplePack->ubSampleCount, sizeof(pSamplePack->ubSampleCount));
 
-	for(UBYTE i = 0; i < pSamplePack->ubSampleCount; ++i) {
-		tPtplayerSfx *pSample = &pSamplePack->pSamples[i];
-		ULONG ulCompressedLength;
-		fileRead(pFileSamples, &pSample->uwWordLength, sizeof(pSample->uwWordLength));
-		fileRead(pFileSamples, &ulCompressedLength, sizeof(ulCompressedLength));
-		pSample->pData = memAllocChip(pSample->uwWordLength * sizeof(UWORD));
-		if(!pSample->pData) {
-			goto fail;
-		}
-		if(ulCompressedLength) {
-			UBYTE *pCompressed = memAllocFast(ulCompressedLength);
-			if(!pCompressed) {
-				goto fail;
-			}
-			fileRead(pFileSamples, pCompressed, ulCompressedLength);
-			ptplayerSfxDecompress(pCompressed, (UBYTE*)pSample->pData, pSample->uwWordLength * sizeof(UWORD));
-			memFree(pCompressed, ulCompressedLength);
-		}
-		else {
-			fileRead(pFileSamples, pSample->pData, pSample->uwWordLength * sizeof(UWORD));
-		}
-	}
-
+	tFile *pFileSamples = fileOpen(szPath, "rb");
+	fileReadWords(pFileSamples, pSamplePack->pData, pSamplePack->ulSize / sizeof(UWORD));
 	fileClose(pFileSamples);
+
 	systemUnuse();
-	logBlockEnd("ptplayerSampleDataCreateFromFd()");
+	logBlockEnd("ptplayerSamplePackCreate()");
 	return pSamplePack;
 fail:
-	if(pFileSamples) {
-		fileClose(pFileSamples);
-	}
 	if(pSamplePack) {
-		for(UBYTE i = 0; i < pSamplePack->ubSampleCount; ++i) {
-			tPtplayerSfx *pSample = &pSamplePack->pSamples[i];
-			if(pSample->pData) {
-				memFree(pSample->pData, pSample->uwWordLength * sizeof(UWORD));
-			}
+		if(pSamplePack->pData) {
+			memFree(pSamplePack->pData, pSamplePack->ulSize);
 		}
 		memFree(pSamplePack, sizeof(*pSamplePack));
 	}
 
 	systemUnuse();
-	logBlockEnd("ptplayerSampleDataCreateFromFd()");
+	logBlockEnd("ptplayerSamplePackCreate()");
 	return 0;
 }
 
 void ptplayerSamplePackDestroy(tPtplayerSamplePack *pSamplePack) {
 	logBlockBegin("ptplayerSamplePackDestroy(pSamplePack: %p)", pSamplePack);
-	for(UBYTE i = 0; i < pSamplePack->ubSampleCount; ++i) {
-		tPtplayerSfx *pSample = &pSamplePack->pSamples[i];
-		memFree(pSample->pData, pSample->uwWordLength * sizeof(UWORD));
-	}
+	memFree(pSamplePack->pData, pSamplePack->ulSize);
 	memFree(pSamplePack, sizeof(*pSamplePack));
 	logBlockEnd("ptplayerSamplePackDestroy()");
-}
-
-void ptplayerSetE8Callback(tPtplayerCbE8 cbOnE8) {
-	s_cbOnE8 = cbOnE8;
 }

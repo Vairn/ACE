@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <ace/managers/blit.h>
+#include <ace/managers/log.h>
 #include <ace/managers/system.h>
 
 void blitManagerCreate(void) {

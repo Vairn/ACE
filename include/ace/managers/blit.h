@@ -21,33 +21,31 @@
 extern "C" {
 #endif
 
-#ifdef AMIGA
-#include <exec/interrupts.h>  // struct Interrupt
-#include <hardware/dmabits.h> // DMAF_BLITTER
-#include <hardware/intbits.h> // INTB_BLIT
-#endif // AMIGA
-
 #include <ace/types.h>
 #include <ace/managers/log.h>
 #include <ace/managers/memory.h>
 #include <ace/utils/custom.h>
 #include <ace/utils/bitmap.h>
 
+#if defined(AMIGA)
 // BltCon0 channel enable bits
 #define USEA 0x800
 #define USEB 0x400
 #define USEC 0x200
 #define USED 0x100
+#endif
 
 // Minterm presets - OR unfriendly!
 #define MINTERM_A 0xF0
 #define MINTERM_B 0xCC
 #define MINTERM_C 0xAA
 #define MINTERM_A_OR_C 0xFA
-#define MINTERM_NA_AND_C 0x0A
+#define MINTERM_NAC 0x0A
 #define MINTERM_COOKIE 0xCA
 #define MINTERM_REVERSE_COOKIE 0xAC
 #define MINTERM_COPY 0xC0
+#define MINTERM_AB_OR_C 0xEA
+#define MINTERM_CLEAR_C_ON_AB 0x2A
 
 typedef enum tBlitLineMode {
 	BLIT_LINE_MODE_OR = ((ABC | ABNC | NABC | NANBC) | (SRCA | SRCC | DEST)),

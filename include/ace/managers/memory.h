@@ -14,17 +14,19 @@
 extern "C" {
 #endif
 
-#ifdef AMIGA
+#include <ace/types.h>
+#include <ace/macros.h>
+
+#if defined(AMIGA)
 #include <exec/memory.h> // MEMF_CLEAR etc
 #else
-#define MEMF_CHIP    0
-#define MEMF_FAST    1
-#define MEMF_CLEAR   2
-#define MEMF_PUBLIC  4
-#define MEMF_LARGEST 8
+#define MEMF_ANY 0
+#define MEMF_PUBLIC  BV(0)
+#define MEMF_CHIP    BV(1)
+#define MEMF_FAST    BV(2)
+#define MEMF_CLEAR   BV(16)
+#define MEMF_LARGEST BV(17)
 #endif // AMIGA
-
-#include <ace/types.h>
 
 /* Types */
 
@@ -36,13 +38,15 @@ extern "C" {
  * @brief Checks whether memory pointer is in CHIP or FAST mem.
  *
  * @param pMem Pointer to memory to be checked.
- * @return MEMF_CHIP or MEMF_FAST.
+ * @return 1 if memory is of CHIP type, otherwise 0.
  */
-UBYTE memType(const void *pMem);
+UBYTE memIsChip(const void *pMem);
 
 ULONG memGetFreeChipSize(void);
 
 ULONG memGetFreeSize(void);
+
+ULONG memAvail(ULONG ulFlags);
 
 void _memCreate(void);
 void _memDestroy(void);

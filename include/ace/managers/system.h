@@ -9,7 +9,6 @@
 extern "C" {
 #endif
 
-#include <graphics/gfxbase.h> // Required for GfxBase
 #include <ace/types.h>
 #include <ace/utils/custom.h>
 
@@ -39,6 +38,13 @@ void systemCreate(void);
  * This is the last thing you should call in your ACE app.
  */
 void systemDestroy(void);
+
+/**
+ * @brief Processes system-specific things.
+ *
+ * Be sure to call this at the end of your main loop.
+ */
+void systemProcessFinal(void);
 
 void systemKill(const char *szMsg);
 

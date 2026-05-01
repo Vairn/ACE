@@ -18,7 +18,7 @@ extern "C" {
 // OS-friendly (old) mode
 // #define CONFIG_SYSTEM_OS_FRIENDLY // TODO: implement
 
-#ifdef AMIGA
+#if defined(AMIGA)
 #include <exec/types.h>
 #else
 #include <stdint.h>
@@ -39,7 +39,7 @@ typedef int32_t LONG;
 #define UWORD_MAX 0xFFFFu
 #define UBYTE_MAX 0xFFu
 
-#if defined(__CODE_CHECKER__) || defined(__INTELLISENSE__)
+#if defined(__CODE_CHECKER__) || defined(__INTELLISENSE__) || !defined(AMIGA)
 // My realtime source checker has problems with GCC asm() expanded from REGARG()
 // being in fn arg list, so I just use blank defines for it
 #define INTERRUPT
@@ -135,44 +135,76 @@ typedef LONG FLONG;
 typedef union _tUwCoordYX {
 	ULONG ulYX;
 	struct {
+#if defined(AMIGA)
 		UWORD uwY;
 		UWORD uwX;
+#else
+		UWORD uwX;
+		UWORD uwY;
+#endif
 	};
 } tUwCoordYX;
 
 typedef union _tUbCoordYX {
 	UWORD uwYX;
 	struct {
+#if defined(AMIGA)
 		UBYTE ubY;
 		UBYTE ubX;
+#else
+		UBYTE ubX;
+		UBYTE ubY;
+#endif
 	};
 } tUbCoordYX;
 
 typedef struct _tBCoordYX {
+#if defined(AMIGA)
 	BYTE bY;
 	BYTE bX;
+#else
+	BYTE bX;
+	BYTE bY;
+#endif
 } tBCoordYX;
 
 typedef struct _tWCoordYX {
+#if defined(AMIGA)
 	WORD wY;
 	WORD wX;
+#else
+	WORD wX;
+	WORD wY;
+#endif
 } tWCoordYX;
 
 /**
  * Rectangle type
  */
 typedef struct _tUwRect {
-	UWORD uwY;
-	UWORD uwX;
+#if defined(AMIGA)
+		UWORD uwY;
+		UWORD uwX;
+#else
+		UWORD uwX;
+		UWORD uwY;
+#endif
 	UWORD uwWidth;
 	UWORD uwHeight;
 } tUwRect;
 
 typedef struct _tUwAbsRect {
-	UWORD uwY1;
-	UWORD uwX1;
-	UWORD uwY2;
-	UWORD uwX2;
+#if defined(AMIGA)
+		UWORD uwY1;
+		UWORD uwX1;
+		UWORD uwY2;
+		UWORD uwX2;
+#else
+		UWORD uwX1;
+		UWORD uwY1;
+		UWORD uwX2;
+		UWORD uwY2;
+#endif
 } tUwAbsRect;
 
 #ifdef __cplusplus

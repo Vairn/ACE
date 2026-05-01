@@ -10,7 +10,6 @@
 #include <ace/managers/log.h>
 #include <ace/utils/custom.h>
 #include <ace/utils/sprite.h>
-
 #define SPRITE_VPOS_BITS 9
 #define SPRITE_HEIGHT_MAX ((1 << SPRITE_VPOS_BITS) - 1)
 
@@ -50,6 +49,7 @@ void spriteManagerCreate(const tView *pView, UWORD uwRawCopPos, ULONG pBlankSpri
 	s_pView = pView;
 	for(UBYTE i = HARDWARE_SPRITE_CHANNEL_COUNT; i--;) {
 		s_pChannelsData[i] = (tSpriteChannel){
+			.pFirstSprite = 0,
 			.uwRawCopPos = uwRawCopPos + 2 * i
 		};
 	}

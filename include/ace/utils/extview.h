@@ -45,8 +45,8 @@ typedef enum tTagView {
 } tTagView;
 
 // Values for TAG_VIEW_COPLIST_MODE
-#define VIEW_COPLIST_MODE_BLOCK COPPER_MODE_BLOCK
-#define VIEW_COPLIST_MODE_RAW   COPPER_MODE_RAW
+#define VIEW_COPLIST_MODE_BLOCK 0
+#define VIEW_COPLIST_MODE_RAW   1
 
 typedef enum tTagVport {
 	// Ptr to parent view
@@ -118,10 +118,13 @@ typedef enum tVpFlag {
  *  @brief ViewPort manager structure.
  *  Only process and destroy included, each manager has different init params.
  */
-typedef struct tVpManager {
-	struct tVpManager *pNext;                      ///< Pointer to next manager.
-	void  (*process)(struct tVpManager *pManager); ///< Process fn handle.
-	void  (*destroy)(struct tVpManager *pManager); ///< Destroy fn handle.
+typedef struct _tVpManager {
+	struct _tVpManager *pNext;                      ///< Pointer to next manager.
+	void  (*process)(struct _tVpManager *pManager); ///< Process fn handle.
+	void  (*destroy)(struct _tVpManager *pManager); ///< Destroy fn handle.
+#if defined(ACE_SDL)
+	void (*cbDrawToSurface)(struct _tVpManager *pManager);
+#endif
 	struct _tVPort *pVPort;                         ///< Quick ref to VPort.
 	UBYTE ubId;                                     ///< Manager ID.
 } tVpManager;
@@ -228,6 +231,8 @@ void viewUpdateGlobalPalette(const tView *pView);
  */
 void viewLoad(tView *pView);
 
+UBYTE viewIsLoaded(const tView *pView);
+
 /*=========================== Viewport functions =============================*/
 
 /**
@@ -321,12 +326,6 @@ void vPortRmManager(tVPort *pVPort, tVpManager *pVpManager);
  *  @return if found, pointer to VPort manager, otherwise zero.
  */
 tVpManager *vPortGetManager(tVPort *pVPort, UBYTE ubId);
-
-/*=========================== Viewport copperblock functions =================*/
-
-struct UCopList *vPortAddCopperBlock(tVPort *pVPort, UWORD uwLength);
-
-void vPortRmCopperBlock(tVPort *pVPort, struct UCopList *pUCopList);
 
 #ifdef __cplusplus
 }

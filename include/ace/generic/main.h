@@ -112,7 +112,9 @@ int main(void) {
 #endif
 
 	blitManagerCreate();
+#if defined(AMIGA)
 	copCreate();
+#endif
 
 	// Call user callbacks:
 	genericCreate();
@@ -121,10 +123,13 @@ int main(void) {
 		timerProcess();
 #endif
 		genericProcess();
+		systemProcessFinal();
 	}
 	genericDestroy();
 
+#if defined(AMIGA)
 	copDestroy();
+#endif
 	blitManagerDestroy();
 
 #if !defined(GENERIC_MAIN_NO_TIMER)

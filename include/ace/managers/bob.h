@@ -5,10 +5,6 @@
 #ifndef _ACE_MANAGERS_BOB_H_
 #define _ACE_MANAGERS_BOB_H_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <ace/types.h>
 #include <ace/managers/blit.h>
 
@@ -22,7 +18,7 @@ extern "C" {
  * bobInit(&sBob1, ...)
  * bobInit(&sBob2, ...)
  * bobInit(&sBobN, ...)
- * bobReallocateBuffers()
+ * bobReallocateBgBuffers()
  *
  * in gamestate loop:
  * bobBegin()
@@ -71,38 +67,58 @@ typedef struct tBob {
 #endif
 	UWORD _uwBlitSize;
 	WORD _wModuloUndrawSave;
-	UWORD _uwInterleavedHeight;
-#if defined(ACE_BOB_PRISTINE_BUFFER)
-	ULONG _pSaveOffsets[2];
-#else
-	UBYTE *_pBufferDrawPtrs[2];
-#endif
+	UBYTE *_pOldDrawOffs[2];
+	UWORD _pOldBgBlitHeight[2];
+	UWORD _pOldBgBlitSize[2];
 } tBob;
+
+// Undraw stack must be accessible during adding new bobs, so the most safe
+// approach is to have two lists - undraw list gets populated after draw
+// and depopulated during undraw
+typedef struct tBobQueue {
+	UBYTE ubUndrawCount;
+	tBob **pBobs;
+	tBitMap *pBg;
+	tBitMap *pDst;
+} tBobQueue;
+
+typedef struct tBobManager {
+	UBYTE ubBufferCurr;
+	UBYTE ubMaxBobCount;
+
+	UBYTE isPushingDone;
+	UBYTE ubBpp;
+
+	// This can't be a decreasing counter such as in toSave/toDraw since after
+	// decrease another bob may be pushed, which would trash bg saving
+	UBYTE ubBobsPushed;
+	UBYTE ubBobsDrawn;
+	UBYTE ubBobsSaved;
+	UWORD uwAvailHeight;
+	UWORD uwBgBufferLength;
+	UWORD uwDestByteWidth;
+
+	tBobQueue pQueues[2];
+} tBobManager;
+
+extern tBobManager g_sBobManager;
 
 /**
  * @brief Creates bob manager with optional double buffering support.
  * If you use single buffering, pass same pointer in pFront and pBack.
  *
  * After calling this fn you should call series of bobInit() followed by
- * single bobReallocateBuffers().
+ * single bobReallocateBgBuffers().
  *
  * @param pFront Double buffering's front buffer bitmap.
  * @param pBack Double buffering's back buffer bitmap.
  * @param uwAvailHeight True available height for Y-scroll in passed bitmap.
- * For tileBuffer you should use `pTileBuffer->pScroll->uwBmAvailHeight`.
- * For scrollBuffer you should use `pScrollBuffer->uwBmAvailHeight`.
  *
  * @see bobInit()
- * @see bobReallocateBuffers()
+ * @see bobReallocateBgBuffers()
  * @see bobManagerDestroy()
  */
-void bobManagerCreate(
-	tBitMap *pFront, tBitMap *pBack,
-#if defined(ACE_BOB_PRISTINE_BUFFER)
-	tBitMap *pPristineBuffer,
-#endif
-	UWORD uwAvailHeight
-);
+void bobManagerCreate(tBitMap *pFront, tBitMap *pBack, UWORD uwAvailHeight);
 
 /**
  * @brief Destroys bob manager, releasing all its resources.
@@ -137,7 +153,7 @@ void bobInit(
  *
  * After call to this function, you can't call bobInit() anymore!
  */
-void bobReallocateBuffers(void);
+void bobReallocateBgBuffers(void);
 
 /**
  * @brief Changes bob's animation frame.
@@ -196,6 +212,8 @@ UBYTE *bobCalcFrameAddress(tBitMap *pBitmap, UWORD uwOffsetY);
  */
 void bobBegin(tBitMap *pBuffer);
 
+void bobCheckGood(const tBitMap *pBack);
+
 /**
  * @brief Adds next bob to draw queue.
  * Bobs which were pushed in previous frame but not in current will still be
@@ -238,40 +256,11 @@ UBYTE bobProcessNext(void);
 void bobPushingDone(void);
 
 /**
- * @brief Processes all pending bobs so far.
- * This is only for advanced usage while ensuring that the bobs pushed so far
- * were already processed, e.g. alter the bitmaps mid-bob (un)draw.
- */
-void bobProcessAll(void);
-
-/**
- * @brief Gets the index of currently processed buffer in double buffering.
- * Used only in advanced scenarios to allow external access to bob struct's
- * private fields.
- * @return Index of the buffer - either 0 or 1.
- */
-UBYTE bobGetCurrentBufferIndex(void);
-
-/**
  * @brief Ends bob processing, enforcing all remaining bobs to be drawn.
  * After making this call all other blitter operations are safe again.
  */
 void bobEnd(void);
 
 void bobDiscardUndraw(void);
-
-/**
- * @brief Sets the current buffer to given bitmap in case it loses sync.
- * Usually used in tandem with bobDiscardUndraw() when bob system was disabled
- * for some time.
- *
- * @param pCurrent Current buffer to use. Must be same as one of passed
- * in bobManagerCreate().
- */
-void bobSetCurrentBuffer(tBitMap *pCurrent);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // _ACE_MANAGERS_BOB_H_

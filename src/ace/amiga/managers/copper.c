@@ -3,11 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <ace/managers/copper.h>
-#ifdef AMIGA
 #include <stdarg.h>
 #include <ace/managers/system.h>
 #include <limits.h>
 #include <proto/exec.h>
+#include <graphics/gfxbase.h> // Required for GfxBase
 
 tCopManager g_sCopManager;
 
@@ -590,5 +590,3 @@ void copSetMove(tCopMoveCmd *pMoveCmd, volatile void *pAddr, UWORD uwValue) {
 	pMoveCmd->bfDestAddr = (ULONG)pAddr - (ULONG)((UBYTE *)g_pCustom);
 	copSetMoveVal(pMoveCmd, uwValue);
 }
-
-#endif // AMIGA
