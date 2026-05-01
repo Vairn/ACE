@@ -99,9 +99,9 @@ void gsTestCopperCreate(void) {
 	s_uwCopRawOffs += simpleBufferGetRawCopperlistInstructionCount(SHOWCASE_BPP);
 
 	// Some dummy palette for borders etc.
-	s_pTestCopperVPort->pPalette[0] = 0x000;
-	s_pTestCopperVPort->pPalette[TEST_COPPER_COLOR_INSIDE] = 0xAAA;
-	s_pTestCopperVPort->pPalette[TEST_COPPER_COLOR_BORDER] = 0x666;
+	s_pTestCopperVPort->uPalette.pOCS[0] = 0x000;
+	s_pTestCopperVPort->uPalette.pOCS[TEST_COPPER_COLOR_INSIDE] = 0xAAA;
+	s_pTestCopperVPort->uPalette.pOCS[TEST_COPPER_COLOR_BORDER] = 0x666;
 
 	// Clear viewport, draw border around it
 	UWORD uwMaxX = s_pTestCopperBfr->uBfrBounds.uwX-1;

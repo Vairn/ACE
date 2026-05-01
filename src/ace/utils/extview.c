@@ -179,7 +179,7 @@ void viewUpdateGlobalPalette(const tView *pView) {
 	if (pView->uwFlags & VIEW_FLAG_GLOBAL_PALETTE)
 	{
 		// for(UBYTE i = 0; i < 32; ++i) {
-		// 	g_pCustom->color[i] = pView->pFirstVPort->pPalette[i];
+		// 	g_pCustom->color[i] = pView->pFirstVPort->uPalette.pOCS[i];
 		// }
 #ifdef ACE_USE_AGA_FEATURES
 		if (pView->pFirstVPort->eFlags & VP_FLAG_AGA) {
@@ -191,7 +191,7 @@ void viewUpdateGlobalPalette(const tView *pView) {
 				//g_pCustom->bplcon3 = p << 13; // Set palette bank.
 				for (UBYTE i = 0; i < 32; ++i)
 				{
-					ULONG* pPaletteAGA = (ULONG*)pView->pFirstVPort->pPalette;
+					ULONG* pPaletteAGA = pView->pFirstVPort->uPalette.pAga;
 
 					UBYTE r = pPaletteAGA[(p*32) + i] >> 16;
 					UBYTE g = pPaletteAGA[(p*32) + i] >> 8;
@@ -210,7 +210,7 @@ void viewUpdateGlobalPalette(const tView *pView) {
 		{
 			for (UBYTE i = 0; i < 32; ++i)
 			{
-				g_pCustom->color[i] = pView->pFirstVPort->pPalette[i];
+				g_pCustom->color[i] = pView->pFirstVPort->uPalette.pOCS[i];
 			}
 		}
 	
@@ -218,7 +218,7 @@ void viewUpdateGlobalPalette(const tView *pView) {
 	{
 		for (UBYTE i = 0; i < 32; ++i)
 		{
-			g_pCustom->color[i] = pView->pFirstVPort->pPalette[i];
+			g_pCustom->color[i] = pView->pFirstVPort->uPalette.pOCS[i];
 		}
 	}
 	#endif // ACE_USE_AGA_FEATURES
@@ -435,8 +435,8 @@ tVPort *vPortCreate(void *pTagList, ...)
 #ifdef ACE_USE_AGA_FEATURES
 	if (pVPort->eFlags & VP_FLAG_AGA) {
 		// AGA uses 24 bit palette entries. 		
-		pVPort->pPalette = memAllocFastClear(sizeof(ULONG) * (1 << pVPort->ubBpp)); 
-		UWORD *pSrcPalette = (UWORD *)tagGet(pTagList, vaTags, TAG_VPORT_PALETTE_PTR, 0);
+		pVPort->uPalette.pAga = memAllocFastClear(sizeof(ULONG) * (1 << pVPort->ubBpp)); 
+		ULONG *pSrcPalette = (ULONG *)tagGet(pTagList, vaTags, TAG_VPORT_PALETTE_PTR, 0);
 		if (pSrcPalette)
 		{
 			UWORD uwPaletteSize = tagGet(pTagList, vaTags, TAG_VPORT_PALETTE_SIZE, 0xFFFF);
@@ -450,7 +450,7 @@ tVPort *vPortCreate(void *pTagList, ...)
 			}
 			else
 			{
-				memcpy(pVPort->pPalette, pSrcPalette, uwPaletteSize * sizeof(ULONG));
+				memcpy(pVPort->uPalette.pAga, pSrcPalette, uwPaletteSize * sizeof(ULONG));
 			}
 		}
 	} 
@@ -458,7 +458,7 @@ tVPort *vPortCreate(void *pTagList, ...)
 #endif
 	{
 		// 12 bit palette entries for Non-AGA
-		pVPort->pPalette = memAllocFastClear(sizeof(UWORD) * 32); 
+		pVPort->uPalette.pOCS = memAllocFastClear(sizeof(UWORD) * 32); 
 	
 		UWORD *pSrcPalette = (UWORD *)tagGet(pTagList, vaTags, TAG_VPORT_PALETTE_PTR, 0);
 		if (pSrcPalette)
@@ -474,7 +474,7 @@ tVPort *vPortCreate(void *pTagList, ...)
 			}
 			else
 			{
-				memcpy(pVPort->pPalette, pSrcPalette, uwPaletteSize * sizeof(UWORD));
+				memcpy(pVPort->uPalette.pOCS, pSrcPalette, uwPaletteSize * sizeof(UWORD));
 			}
 		}
 	}
@@ -528,16 +528,16 @@ void vPortDestroy(tVPort *pVPort)
 			if (pVPort->eFlags & VP_FLAG_AGA)
 			{
 				// AGA uses 24 bit palette entries. 
-				memFree(pVPort->pPalette, sizeof(ULONG) * (1 << pVPort->ubBpp));
+				memFree(pVPort->uPalette.pAga, sizeof(ULONG) * (1 << pVPort->ubBpp));
 			}
 			else
 			{
 				// 12 bit palette entries for Non-AGA
-				memFree(pVPort->pPalette, sizeof(UWORD) * (32)); 
+				memFree(pVPort->uPalette.pOCS, sizeof(UWORD) * (32)); 
 			}
 #else
 			// 12 bit palette entries for Non-AGA
-			memFree(pVPort->pPalette, sizeof(UWORD) * (32)); 
+			memFree(pVPort->uPalette.pOCS, sizeof(UWORD) * (32)); 
 #endif
 			
 			// Free stuff

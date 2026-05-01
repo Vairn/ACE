@@ -35,11 +35,11 @@ void gsTestFontCreate(void) {
 		TAG_SIMPLEBUFFER_BITMAP_FLAGS, BMF_CLEAR,
 		TAG_DONE
 	);
-	s_pTestFontVPort->pPalette[0] = 0x000;
-	s_pTestFontVPort->pPalette[1] = 0xAAA;
-	s_pTestFontVPort->pPalette[2] = 0x666;
-	s_pTestFontVPort->pPalette[3] = 0xFFF;
-	s_pTestFontVPort->pPalette[4] = 0x111;
+	s_pTestFontVPort->uPalette.pOCS[0] = 0x000;
+	s_pTestFontVPort->uPalette.pOCS[1] = 0xAAA;
+	s_pTestFontVPort->uPalette.pOCS[2] = 0x666;
+	s_pTestFontVPort->uPalette.pOCS[3] = 0xFFF;
+	s_pTestFontVPort->uPalette.pOCS[4] = 0x111;
 
 	// Load fonts
 	s_pFontUI = fontCreateFromPath("data/fonts/silkscreen.fnt");

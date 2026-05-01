@@ -40,11 +40,11 @@ void gsMenuCreate(void) {
 	);
 
 	// Prepare palette
-	s_pMenuVPort->pPalette[0] = 0x000;
-	s_pMenuVPort->pPalette[1] = 0xAAA;
-	s_pMenuVPort->pPalette[2] = 0x666;
-	s_pMenuVPort->pPalette[3] = 0xFFF;
-	s_pMenuVPort->pPalette[4] = 0x111;
+	s_pMenuVPort->uPalette.pOCS[0] = 0x000;
+	s_pMenuVPort->uPalette.pOCS[1] = 0xAAA;
+	s_pMenuVPort->uPalette.pOCS[2] = 0x666;
+	s_pMenuVPort->uPalette.pOCS[3] = 0xFFF;
+	s_pMenuVPort->uPalette.pOCS[4] = 0x111;
 
 	// Load font
 	s_pMenuFont = fontCreateFromPath("data/fonts/silkscreen.fnt");

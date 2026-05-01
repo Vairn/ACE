@@ -67,10 +67,10 @@ void gsTestTwisterCreate(void) {
 	s_ps = 0;
 	s_isVectors = 0;
 	s_isAdvancePs = 1;
-	s_pVPort->pPalette[0] = 0x000;
-	s_pVPort->pPalette[1] = 0x057;
-	s_pVPort->pPalette[2] = 0x49b;
-	s_pVPort->pPalette[3] = 0x8df;
+	s_pVPort->uPalette.pOCS[0] = 0x000;
+	s_pVPort->uPalette.pOCS[1] = 0x057;
+	s_pVPort->uPalette.pOCS[2] = 0x49b;
+	s_pVPort->uPalette.pOCS[3] = 0x8df;
 
 	randInit(&s_sRand, 1911, 2184);
 
@@ -88,7 +88,7 @@ void gsTestTwisterLoop(void) {
 		cameraSetCoord(s_pBfr->pCamera, 0, 0);
 	}
 	else if(keyUse(KEY_B)) {
-		bitmapSaveBmp(s_pBfr->pFront, s_pVPort->pPalette, "twister.bmp");
+		bitmapSaveBmp(s_pBfr->pFront, s_pVPort->uPalette.pOCS, "twister.bmp");
 	}
 	else if(keyUse(KEY_I)) {
 		s_isAdvancePs = !s_isAdvancePs;

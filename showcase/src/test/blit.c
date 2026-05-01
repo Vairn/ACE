@@ -33,11 +33,11 @@ void gsTestBlitCreate(void) {
 		TAG_SIMPLEBUFFER_BITMAP_FLAGS, BMF_CLEAR,
 		TAG_DONE
 	);
-	s_pTestBlitVPort->pPalette[0] = 0x000;
-	s_pTestBlitVPort->pPalette[1] = 0xAAA;
-	s_pTestBlitVPort->pPalette[2] = 0x666;
-	s_pTestBlitVPort->pPalette[3] = 0xFFF;
-	s_pTestBlitVPort->pPalette[4] = 0x111;
+	s_pTestBlitVPort->uPalette.pOCS[0] = 0x000;
+	s_pTestBlitVPort->uPalette.pOCS[1] = 0xAAA;
+	s_pTestBlitVPort->uPalette.pOCS[2] = 0x666;
+	s_pTestBlitVPort->uPalette.pOCS[3] = 0xFFF;
+	s_pTestBlitVPort->uPalette.pOCS[4] = 0x111;
 
 	// Loop vars
 	s_uwX = s_pTestBlitBfr->uBfrBounds.uwX >> 1;

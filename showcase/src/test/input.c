@@ -134,11 +134,11 @@ void gsTestInputCreate(void) {
 		TAG_SIMPLEBUFFER_BITMAP_FLAGS, BMF_CLEAR,
 		TAG_DONE
 	);
-	s_pTestInputVPort->pPalette[0] = 0x000;
-	s_pTestInputVPort->pPalette[1] = 0xAAA;
-	s_pTestInputVPort->pPalette[2] = 0x666;
-	s_pTestInputVPort->pPalette[3] = 0xFFF;
-	s_pTestInputVPort->pPalette[4] = 0x333;
+	s_pTestInputVPort->uPalette.pOCS[0] = 0x000;
+	s_pTestInputVPort->uPalette.pOCS[1] = 0xAAA;
+	s_pTestInputVPort->uPalette.pOCS[2] = 0x666;
+	s_pTestInputVPort->uPalette.pOCS[3] = 0xFFF;
+	s_pTestInputVPort->uPalette.pOCS[4] = 0x333;
 
 	s_pFont = fontCreateFromPath("data/fonts/silkscreen.fnt");
 	s_pTextBitMap = fontCreateTextBitMap(320, s_pFont->uwHeight);

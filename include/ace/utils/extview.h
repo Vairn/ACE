@@ -145,6 +145,11 @@ typedef struct tView {
 	struct _tVPort *pFirstVPort; ///< Pointer to first VPort on list.
 } tView;
 
+typedef union tVPortPalette {
+	UWORD *pOCS; ///< OCS/ECS 12-bit palette entries.
+	ULONG *pAga; ///< AGA 24-bit palette entries.
+} tVPortPalette;
+
 /**
  *  @brief The viewport structure.
  *  Each viewport has specified resolution, screen dimensions and its own
@@ -169,7 +174,7 @@ typedef struct _tVPort {
 	UBYTE ubFmode;	  ///< FMODE value
 #endif
 	
-	UWORD* pPalette;
+	tVPortPalette uPalette; ///< Interpreted by VP_FLAG_AGA.
 
 	
 } tVPort;

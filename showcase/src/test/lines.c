@@ -37,9 +37,9 @@ void gsTestLinesCreate(void) {
 		TAG_END
 	);
 
-	s_pVPort->pPalette[1] = 0xF00;
-	s_pVPort->pPalette[2] = 0x0F0;
-	s_pVPort->pPalette[3] = 0x00F;
+	s_pVPort->uPalette.pOCS[1] = 0xF00;
+	s_pVPort->uPalette.pOCS[2] = 0x0F0;
+	s_pVPort->uPalette.pOCS[3] = 0x00F;
 
 	UWORD uwMinX = 0;
 	UWORD uwMaxX = s_pBfrManager->uBfrBounds.uwX-1;

@@ -37,7 +37,7 @@ void gsTestInterleavedCreate(void) {
 		TAG_DONE
 	);
 	paletteLoadFromPath(
-		"data/amidb32.plt", s_pTestInterleavedVPort->pPalette, 1 << SHOWCASE_BPP
+		"data/amidb32.plt", s_pTestInterleavedVPort->uPalette.pOCS, 1 << SHOWCASE_BPP
 	);
 	bitmapLoadFromPath(
 		s_pTestInterleavedBfr->pBack, "data/32c_pal_interleaved.bm", 0, 0
