@@ -4,13 +4,15 @@
 typedef struct tDiagnosticDef {
 	const char *szName;
 	UBYTE ubBpp;
+	UBYTE isEhb;
 } tDiagnosticDef;
 
 static const tDiagnosticDef s_pDiagnostics[DIAG_TEST_COUNT] = {
-	[DIAG_TEST_SIMPLE_BPP_2] = {"SimpleBuffer 2 BPP", 2},
-	[DIAG_TEST_SIMPLE_BPP_3] = {"SimpleBuffer 3 BPP", 3},
-	[DIAG_TEST_SIMPLE_BPP_4] = {"SimpleBuffer 4 BPP", 4},
-	[DIAG_TEST_SIMPLE_BPP_5] = {"SimpleBuffer 5 BPP", 5},
+	[DIAG_TEST_SIMPLE_BPP_2] = {"SimpleBuffer 2 BPP", 2, 0},
+	[DIAG_TEST_SIMPLE_BPP_3] = {"SimpleBuffer 3 BPP", 3, 0},
+	[DIAG_TEST_SIMPLE_BPP_4] = {"SimpleBuffer 4 BPP", 4, 0},
+	[DIAG_TEST_SIMPLE_BPP_5] = {"SimpleBuffer 5 BPP", 5, 0},
+	[DIAG_TEST_SIMPLE_BPP_5_EHB] = {"SimpleBuffer 5 BPP EHB", 6, 1},
 };
 
 tStateManager *g_pDiagStateManager = 0;
@@ -31,6 +33,11 @@ tState g_pDiagStates[DIAG_TEST_COUNT] = {
 		.cbDestroy = diagSimpleBufferBppDestroy,
 	},
 	[DIAG_TEST_SIMPLE_BPP_5] = {
+		.cbCreate = diagSimpleBufferBppCreate,
+		.cbLoop = diagSimpleBufferBppLoop,
+		.cbDestroy = diagSimpleBufferBppDestroy,
+	},
+	[DIAG_TEST_SIMPLE_BPP_5_EHB] = {
 		.cbCreate = diagSimpleBufferBppCreate,
 		.cbLoop = diagSimpleBufferBppLoop,
 		.cbDestroy = diagSimpleBufferBppDestroy,
@@ -67,6 +74,10 @@ void diagnosticsPrevTest(void) {
 
 UBYTE diagnosticsGetCurrentBpp(void) {
 	return s_pDiagnostics[s_ubCurrentTest].ubBpp;
+}
+
+UBYTE diagnosticsIsCurrentEhb(void) {
+	return s_pDiagnostics[s_ubCurrentTest].isEhb;
 }
 
 const char *diagnosticsGetCurrentName(void) {

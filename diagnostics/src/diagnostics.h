@@ -9,6 +9,7 @@ typedef enum tDiagnosticTest {
 	DIAG_TEST_SIMPLE_BPP_3,
 	DIAG_TEST_SIMPLE_BPP_4,
 	DIAG_TEST_SIMPLE_BPP_5,
+	DIAG_TEST_SIMPLE_BPP_5_EHB,
 	DIAG_TEST_COUNT
 } tDiagnosticTest;
 
@@ -23,6 +24,7 @@ void diagnosticsNextTest(void);
 void diagnosticsPrevTest(void);
 
 UBYTE diagnosticsGetCurrentBpp(void);
+UBYTE diagnosticsIsCurrentEhb(void);
 const char *diagnosticsGetCurrentName(void);
 
 #endif // _DIAGNOSTICS_H_

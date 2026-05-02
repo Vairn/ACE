@@ -15,43 +15,43 @@ static tSimpleBufferManager *s_pBuffer;
 static tFont *s_pFont;
 static tTextBitMap *s_pTextBitMap;
 
-static UWORD makePaletteColor(UBYTE ubIndex, UBYTE ubColorCount) {
-	UBYTE ubStep = ubColorCount > 1 ? (15 * ubIndex) / (ubColorCount - 1) : 0;
+static UWORD makePaletteColor(UWORD uwIndex, UWORD uwColorCount) {
+	UBYTE ubStep = uwColorCount > 1 ? (15 * uwIndex) / (uwColorCount - 1) : 0;
 	UBYTE ubR = ubStep;
-	UBYTE ubG = (ubIndex * 5) & 0x0F;
+	UBYTE ubG = (uwIndex * 5) & 0x0F;
 	UBYTE ubB = 15 - ubStep;
 
 	return (ubR << 8) | (ubG << 4) | ubB;
 }
 
 static void setupPalette(UBYTE ubBpp) {
-	UBYTE ubColorCount = 1 << ubBpp;
+	UWORD uwColorCount = diagnosticsIsCurrentEhb() ? 32 : (1 << ubBpp);
 
 	s_pVPort->pPalette[0] = 0x000;
-	for(UBYTE i = 1; i < ubColorCount; ++i) {
-		s_pVPort->pPalette[i] = makePaletteColor(i, ubColorCount);
+	for(UWORD i = 1; i < uwColorCount; ++i) {
+		s_pVPort->pPalette[i] = makePaletteColor(i, uwColorCount);
 	}
-	s_pVPort->pPalette[ubColorCount - 1] = 0xFFF;
+	s_pVPort->pPalette[uwColorCount - 1] = 0xFFF;
 }
 
 static void drawPattern(UBYTE ubBpp) {
-	UBYTE ubColorCount = 1 << ubBpp;
+	UWORD uwColorCount = 1 << ubBpp;
 	UWORD uwWidth = s_pBuffer->uBfrBounds.uwX;
 	UWORD uwHeight = s_pBuffer->uBfrBounds.uwY;
 	UWORD uwStripeHeight = 12;
 	UWORD uwBlockSize = 24;
-	UBYTE ubBright = ubColorCount - 1;
+	UBYTE ubBright = diagnosticsIsCurrentEhb() ? 31 : uwColorCount - 1;
 
 	blitRect(s_pBuffer->pBack, 0, 0, uwWidth, uwHeight, 0);
 
 	for(UWORD y = 0; y < uwHeight; y += uwStripeHeight) {
-		UBYTE ubColor = 1 + ((y / uwStripeHeight) % (ubColorCount - 1));
+		UBYTE ubColor = 1 + ((y / uwStripeHeight) % (uwColorCount - 1));
 		blitRect(s_pBuffer->pBack, 0, y, uwWidth, uwStripeHeight, ubColor);
 	}
 
 	for(UWORD y = 64; y < uwHeight; y += uwBlockSize) {
 		for(UWORD x = 0; x < uwWidth; x += uwBlockSize) {
-			UBYTE ubColor = (x / uwBlockSize + y / uwBlockSize) % ubColorCount;
+			UBYTE ubColor = (x / uwBlockSize + y / uwBlockSize) % uwColorCount;
 			blitRect(s_pBuffer->pBack, x, y, uwBlockSize / 2, uwBlockSize / 2, ubColor);
 		}
 	}
@@ -69,20 +69,48 @@ static void drawPattern(UBYTE ubBpp) {
 	blitRect(s_pBuffer->pBack, uwWidth - 1, 0, 1, uwHeight, ubBright);
 }
 
+static void drawPaletteSwatches(UBYTE ubBpp) {
+	UWORD uwColorCount = 1 << ubBpp;
+	UWORD uwWidth = s_pBuffer->uBfrBounds.uwX;
+	UWORD uwHeight = s_pBuffer->uBfrBounds.uwY;
+	UWORD uwSquare = 6;
+	UWORD uwStep = 8;
+	UWORD uwMaxCols = (uwWidth - 8) / uwStep;
+	UWORD uwCols = uwColorCount < uwMaxCols ? uwColorCount : uwMaxCols;
+	UWORD uwRows = (uwColorCount + uwCols - 1) / uwCols;
+	UWORD uwStartX = 4;
+	UWORD uwStartY = uwHeight - 4 - uwRows * uwStep;
+	UWORD uwBackWidth = uwCols * uwStep + 4;
+	UWORD uwBackHeight = uwRows * uwStep + 4;
+
+	blitRect(s_pBuffer->pBack, 2, uwStartY - 2, uwBackWidth, uwBackHeight, 0);
+
+	for(UWORD i = 0; i < uwColorCount; ++i) {
+		UWORD uwX = uwStartX + (i % uwCols) * uwStep;
+		UWORD uwY = uwStartY + (i / uwCols) * uwStep;
+
+		blitRect(s_pBuffer->pBack, uwX, uwY, uwSquare, uwSquare, i);
+	}
+}
+
+static void drawHeaderLine(UWORD uwY, const char *szText, UBYTE ubTextColor) {
+	blitRect(s_pBuffer->pBack, 0, uwY, s_pBuffer->uBfrBounds.uwX, 9, 0);
+	fontDrawStr(
+		s_pFont, s_pBuffer->pBack, 4, uwY + 1,
+		szText, ubTextColor, FONT_LEFT | FONT_TOP, s_pTextBitMap
+	);
+}
+
 static void drawHeader(UBYTE ubBpp) {
 	char szTitle[64];
-	UBYTE ubTextColor = (1 << ubBpp) - 1;
+	UBYTE ubTextColor = diagnosticsIsCurrentEhb() ? 31 : (1 << ubBpp) - 1;
 
 	sprintf(szTitle, "DIAG: %s", diagnosticsGetCurrentName());
-	fontDrawStr(
-		s_pFont, s_pBuffer->pBack, 4, 4,
-		szTitle, ubTextColor, FONT_LEFT | FONT_TOP, s_pTextBitMap
-	);
-	fontDrawStr(
-		s_pFont, s_pBuffer->pBack, 4, 14,
-		"SPACE next  BACKSPACE prev  ESC quit",
-		ubTextColor, FONT_LEFT | FONT_TOP, s_pTextBitMap
-	);
+	drawHeaderLine(4, szTitle, ubTextColor);
+	drawHeaderLine(13, "SPACE next  BACKSPACE prev  ESC quit", ubTextColor);
+	if(diagnosticsIsCurrentEhb()) {
+		drawHeaderLine(22, "EHB: colors 32-63 are half-brite", ubTextColor);
+	}
 }
 
 void diagSimpleBufferBppCreate(void) {
@@ -106,6 +134,7 @@ void diagSimpleBufferBppCreate(void) {
 	s_pTextBitMap = fontCreateTextBitMap(336, s_pFont->uwHeight);
 
 	drawPattern(ubBpp);
+	drawPaletteSwatches(ubBpp);
 	drawHeader(ubBpp);
 
 	systemUnuse();
