@@ -167,13 +167,16 @@ void viewProcessManagers(tView *pView)
 	}
 }
 
+static void viewUpdateOcsPalette(const tView *pView) {
+	for(UBYTE i = 0; i < 32; ++i) {
+		g_pCustom->color[i] = pView->pFirstVPort->pPalette[i];
+	}
+}
+
 void viewUpdateGlobalPalette(const tView *pView) {
 #ifdef AMIGA
 	if (pView->uwFlags & VIEW_FLAG_GLOBAL_PALETTE)
 	{
-		// for(UBYTE i = 0; i < 32; ++i) {
-		// 	g_pCustom->color[i] = pView->pFirstVPort->pPalette[i];
-		// }
 	#ifdef ACE_USE_AGA_FEATURES
 		if (pView->pFirstVPort->eFlags & VP_FLAG_AGA) {
 
@@ -198,18 +201,10 @@ void viewUpdateGlobalPalette(const tView *pView) {
 		}
 		else
 		{
-			for (UBYTE i = 0; i < 32; ++i)
-			{
-				g_pCustom->color[i] = pView->pFirstVPort->pPalette[i];
-			}
+			viewUpdateOcsPalette(pView);
 		}
 	#else // ACE_USE_AGA_FEATURES
-	{
-		for (UBYTE i = 0; i < 32; ++i)
-		{
-			g_pCustom->color[i] = pView->pFirstVPort->pPalette[i];
-		}
-	}
+		viewUpdateOcsPalette(pView);
 	#endif // ACE_USE_AGA_FEATURES
 }
 #endif // AMIGA
