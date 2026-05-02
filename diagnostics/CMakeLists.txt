@@ -8,7 +8,7 @@ if(NOT AMIGA)
 endif()
 
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DAMIGA -Wall -Wextra -fomit-frame-pointer")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DAMIGA -Wall -Wextra -O2 -fomit-frame-pointer")
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DACE_DEBUG")
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.c)
@@ -19,6 +19,7 @@ include_directories(${PROJECT_SOURCE_DIR}/src)
 set(RES_DIR ${CMAKE_CURRENT_LIST_DIR}/res)
 set(DATA_DIR ${CMAKE_CURRENT_BINARY_DIR}/data)
 
+set(ACE_USE_AGA_FEATURES ON CACHE BOOL "" FORCE)
 add_subdirectory(.. ace)
 include_directories(../include)
 

@@ -1,5 +1,6 @@
 #include <ace/managers/game.h>
 #include <ace/managers/key.h>
+#include <ace/managers/system.h>
 
 #include "diagnostics.h"
 
@@ -9,6 +10,7 @@
 void genericCreate(void) {
 	keyCreate();
 	diagnosticsCreate();
+	systemUnuse();
 	diagnosticsChangeTo(DIAG_TEST_SIMPLE_BPP_2);
 }
 
@@ -20,4 +22,5 @@ void genericProcess(void) {
 void genericDestroy(void) {
 	diagnosticsDestroy();
 	keyDestroy();
+	systemUse();
 }

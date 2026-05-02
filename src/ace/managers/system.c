@@ -1335,6 +1335,20 @@ UBYTE systemIsPal(void) {
 	return 1; // PAL
 }
 
+UBYTE systemIsAga(void) {
+	if(!GfxBase) {
+		return 0;
+	}
+
+	const UBYTE ubAliceLisaBits = GFXF_AA_ALICE | GFXF_AA_LISA;
+	const UBYTE ubChipRevBits = GfxBase->ChipRevBits0;
+
+	return (
+		(ubChipRevBits & ubAliceLisaBits) == ubAliceLisaBits ||
+		(ubChipRevBits & GFXF_AA_MLISA)
+	);
+}
+
 void systemCheckStack(void) {
 	char *pStackLower = (char *)s_pProcess->pr_Task.tc_SPLower;
 	register ULONG *pCurrentStackPos __asm("sp");

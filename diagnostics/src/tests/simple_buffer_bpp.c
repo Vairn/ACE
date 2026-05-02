@@ -3,8 +3,8 @@
 #include <ace/managers/game.h>
 #include <ace/managers/key.h>
 #include <ace/managers/system.h>
+#include <ace/managers/timer.h>
 #include <ace/managers/viewport/simplebuffer.h>
-#include <ace/utils/font.h>
 #include <stdio.h>
 
 #include "diagnostics.h"
@@ -12,8 +12,8 @@
 static tView *s_pView;
 static tVPort *s_pVPort;
 static tSimpleBufferManager *s_pBuffer;
-static tFont *s_pFont;
-static tTextBitMap *s_pTextBitMap;
+static UBYTE s_isFallbackScreen;
+static ULONG s_ulAutoAdvanceStart;
 
 static UWORD makePaletteColor(UWORD uwIndex, UWORD uwColorCount) {
 	UBYTE ubStep = uwColorCount > 1 ? (15 * uwIndex) / (uwColorCount - 1) : 0;
@@ -24,8 +24,28 @@ static UWORD makePaletteColor(UWORD uwIndex, UWORD uwColorCount) {
 	return (ubR << 8) | (ubG << 4) | ubB;
 }
 
-static void setupPalette(UBYTE ubBpp) {
+static ULONG makePaletteColorAga(UWORD uwIndex, UWORD uwColorCount) {
+	UBYTE ubStep = uwColorCount > 1 ? (255 * uwIndex) / (uwColorCount - 1) : 0;
+	UBYTE ubR = ubStep;
+	UBYTE ubG = (uwIndex * 37) & 0xFF;
+	UBYTE ubB = 255 - ubStep;
+
+	return ((ULONG)ubR << 16) | ((ULONG)ubG << 8) | ubB;
+}
+
+static void setupPalette(UBYTE ubBpp, UBYTE isAgaMode) {
 	UWORD uwColorCount = diagnosticsIsCurrentEhb() ? 32 : (1 << ubBpp);
+
+	if(isAgaMode) {
+		ULONG *pPalette = (ULONG *)s_pVPort->pPalette;
+
+		pPalette[0] = 0x000000;
+		for(UWORD i = 1; i < uwColorCount; ++i) {
+			pPalette[i] = makePaletteColorAga(i, uwColorCount);
+		}
+		pPalette[uwColorCount - 1] = 0xFFFFFF;
+		return;
+	}
 
 	s_pVPort->pPalette[0] = 0x000;
 	for(UWORD i = 1; i < uwColorCount; ++i) {
@@ -69,6 +89,13 @@ static void drawPattern(UBYTE ubBpp) {
 	blitRect(s_pBuffer->pBack, uwWidth - 1, 0, 1, uwHeight, ubBright);
 }
 
+static void drawFallbackScreen(void) {
+	blitRect(
+		s_pBuffer->pBack, 0, 0,
+		s_pBuffer->uBfrBounds.uwX, s_pBuffer->uBfrBounds.uwY, 0
+	);
+}
+
 static void drawPaletteSwatches(UBYTE ubBpp) {
 	UWORD uwColorCount = 1 << ubBpp;
 	UWORD uwWidth = s_pBuffer->uBfrBounds.uwX;
@@ -96,52 +123,101 @@ static void drawPaletteSwatches(UBYTE ubBpp) {
 static void drawHeaderLine(UWORD uwY, const char *szText, UBYTE ubTextColor) {
 	blitRect(s_pBuffer->pBack, 0, uwY, s_pBuffer->uBfrBounds.uwX, 9, 0);
 	fontDrawStr(
-		s_pFont, s_pBuffer->pBack, 4, uwY + 1,
-		szText, ubTextColor, FONT_LEFT | FONT_TOP, s_pTextBitMap
+		diagnosticsGetFont(), s_pBuffer->pBack, 4, uwY + 1,
+		szText, ubTextColor, FONT_LEFT | FONT_TOP, diagnosticsGetTextBitMap()
 	);
 }
 
 static void drawHeader(UBYTE ubBpp) {
 	char szTitle[64];
-	UBYTE ubTextColor = diagnosticsIsCurrentEhb() ? 31 : (1 << ubBpp) - 1;
+	char szChipset[64];
+	char szFmode[32];
+	UBYTE ubTextColor = s_isFallbackScreen ? 15 : (
+		diagnosticsIsCurrentEhb() ? 31 : (1 << ubBpp) - 1
+	);
 
 	sprintf(szTitle, "DIAG: %s", diagnosticsGetCurrentName());
 	drawHeaderLine(4, szTitle, ubTextColor);
 	drawHeaderLine(13, "SPACE next  BACKSPACE prev  ESC quit", ubTextColor);
-	if(diagnosticsIsCurrentEhb()) {
+	if(s_isFallbackScreen) {
+		drawHeaderLine(22, "AGA chipset not detected", ubTextColor);
+		drawHeaderLine(31, "This is a fallback screen", ubTextColor);
+		sprintf(
+			szChipset, "GfxBase=%p ChipRevBits0=$%02X",
+			GfxBase, GfxBase ? GfxBase->ChipRevBits0 : 0
+		);
+		drawHeaderLine(40, szChipset, ubTextColor);
+		sprintf(szFmode, "Requested FMODE %u", diagnosticsGetCurrentFmode());
+		drawHeaderLine(49, szFmode, ubTextColor);
+	}
+	else if(diagnosticsIsCurrentAga()) {
+		sprintf(szFmode, "FMODE %u", diagnosticsGetCurrentFmode());
+		drawHeaderLine(22, szFmode, ubTextColor);
+	}
+	else if(diagnosticsIsCurrentEhb()) {
 		drawHeaderLine(22, "EHB: colors 32-63 are half-brite", ubTextColor);
 	}
 }
 
 void diagSimpleBufferBppCreate(void) {
-	UBYTE ubBpp = diagnosticsGetCurrentBpp();
+	UBYTE ubRequestedBpp = diagnosticsGetCurrentBpp();
+	UBYTE isAgaMode = diagnosticsIsCurrentAga() && systemIsAga();
+	UBYTE ubDisplayBpp = isAgaMode ? ubRequestedBpp : 4;
 
-	s_pView = viewCreate(0,
-		TAG_VIEW_GLOBAL_PALETTE, 1,
-	TAG_END);
-	s_pVPort = vPortCreate(0,
-		TAG_VPORT_VIEW, s_pView,
-		TAG_VPORT_BPP, ubBpp,
-	TAG_END);
+	if(!diagnosticsIsCurrentAga()) {
+		ubDisplayBpp = ubRequestedBpp;
+	}
+	s_isFallbackScreen = diagnosticsIsCurrentAga() && !isAgaMode;
+
+	if(isAgaMode) {
+		s_pView = viewCreate(0,
+			TAG_VIEW_GLOBAL_PALETTE, 1,
+			TAG_VIEW_USES_AGA, 1,
+		TAG_END);
+		s_pVPort = vPortCreate(0,
+			TAG_VPORT_VIEW, s_pView,
+			TAG_VPORT_BPP, ubDisplayBpp,
+			TAG_VPORT_USES_AGA, 1,
+			TAG_VPORT_FMODE, diagnosticsGetCurrentFmode(),
+		TAG_END);
+	}
+	else {
+		s_pView = viewCreate(0,
+			TAG_VIEW_GLOBAL_PALETTE, 1,
+		TAG_END);
+		s_pVPort = vPortCreate(0,
+			TAG_VPORT_VIEW, s_pView,
+			TAG_VPORT_BPP, ubDisplayBpp,
+		TAG_END);
+	}
 	s_pBuffer = simpleBufferCreate(0,
 		TAG_SIMPLEBUFFER_VPORT, s_pVPort,
 		TAG_SIMPLEBUFFER_BITMAP_FLAGS, BMF_CLEAR,
 	TAG_END);
 
-	setupPalette(ubBpp);
+	setupPalette(ubDisplayBpp, isAgaMode);
 
-	s_pFont = fontCreateFromPath("data/fonts/quaver.fnt");
-	s_pTextBitMap = fontCreateTextBitMap(336, s_pFont->uwHeight);
+	s_ulAutoAdvanceStart = timerGet();
 
-	drawPattern(ubBpp);
-	drawPaletteSwatches(ubBpp);
-	drawHeader(ubBpp);
+	if(s_isFallbackScreen) {
+		drawFallbackScreen();
+		drawHeader(ubRequestedBpp);
+	}
+	else {
+		drawPattern(ubDisplayBpp);
+		drawPaletteSwatches(ubDisplayBpp);
+		drawHeader(ubRequestedBpp);
+	}
 
-	systemUnuse();
 	viewLoad(s_pView);
 }
 
 void diagSimpleBufferBppLoop(void) {
+	if(timerGetDelta(s_ulAutoAdvanceStart, timerGet()) >= systemGetVerticalBlankFrequency() * 2) {
+		diagnosticsNextTest();
+		return;
+	}
+
 	if(keyUse(KEY_ESCAPE)) {
 		gameExit();
 		return;
@@ -159,9 +235,6 @@ void diagSimpleBufferBppLoop(void) {
 }
 
 void diagSimpleBufferBppDestroy(void) {
-	systemUse();
+	viewLoad(0);
 	viewDestroy(s_pView);
-
-	fontDestroyTextBitMap(s_pTextBitMap);
-	fontDestroy(s_pFont);
 }

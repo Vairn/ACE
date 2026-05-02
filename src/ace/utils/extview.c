@@ -50,11 +50,11 @@ tView *viewCreate(void *pTags, ...) {
 	if(tagGet(pTags, vaTags, TAG_VIEW_GLOBAL_BPP, 1)) {
 		pView->uwFlags |= VIEW_FLAG_GLOBAL_BPP;
 	}
-	#ifdef ACE_USE_AGA_FEATURES
-	if(tagGet(pTags, vaTags, TAG_VIEW_USES_AGA, 1)) {
+#ifdef ACE_USE_AGA_FEATURES
+	if(tagGet(pTags, vaTags, TAG_VIEW_USES_AGA, 0)) {
 		pView->uwFlags |= VIEW_FLAG_GLOBAL_AGA;
 	}
-	#endif
+#endif
 	logWrite(
 		"Extra flags: %s%s%s\n",
 		(pView->uwFlags & VIEW_FLAG_GLOBAL_PALETTE) ? "GLOBAL_PALETTE " : "",
@@ -174,7 +174,7 @@ void viewUpdateGlobalPalette(const tView *pView) {
 		// for(UBYTE i = 0; i < 32; ++i) {
 		// 	g_pCustom->color[i] = pView->pFirstVPort->pPalette[i];
 		// }
-#ifdef ACE_USE_AGA_FEATURES
+	#ifdef ACE_USE_AGA_FEATURES
 		if (pView->pFirstVPort->eFlags & VP_FLAG_AGA) {
 
 			WORD colourBanks = (1 << pView->pFirstVPort->ubBpp) /32 ;
@@ -193,20 +193,16 @@ void viewUpdateGlobalPalette(const tView *pView) {
 					g_pCustom->color[i] = (r >>4) << 8 | (g >>4) << 4 | (b >>4) << 0;
 					g_pCustom->bplcon3 = p << 13 | BV(9); // Set palette bank High.
 					g_pCustom->color[i] = (0x0F & r) << 8 | (0x0F & g) << 4 | (0x0F &b) << 0;
-					
-					 
 				}
 			}
 		}
 		else
-
 		{
 			for (UBYTE i = 0; i < 32; ++i)
 			{
 				g_pCustom->color[i] = pView->pFirstVPort->pPalette[i];
 			}
 		}
-	
 	#else // ACE_USE_AGA_FEATURES
 	{
 		for (UBYTE i = 0; i < 32; ++i)
@@ -236,11 +232,10 @@ void viewLoad(tView *pView)
 		g_sCopManager.pCopList = g_sCopManager.pBlankList;
 		g_pCustom->bplcon0 = 0; // No output
 #ifdef ACE_USE_AGA_FEATURES
-		g_pCustom->bplcon3 = 0; // AGA fix
-		g_pCustom->fmode = 0; // Safe default when no view is loaded
-#else
-		g_pCustom->bplcon3 = 0; // AGA fix
-		g_pCustom->fmode =0;	// AGA fix
+		if(systemIsAga()) {
+			g_pCustom->bplcon3 = 0;
+			g_pCustom->fmode = 0; // Safe default when no view is loaded
+		}
 #endif
 		for (UBYTE i = 0; i < 8; ++i)
 		{
@@ -278,13 +273,15 @@ void viewLoad(tView *pView)
 		// Seems strange that everything relies on the first viewport flags, and palette etc
 #ifdef ACE_USE_AGA_FEATURES
 		if (pView->pFirstVPort->eFlags & VP_FLAG_AGA) {
-			g_pCustom->bplcon0 = ((0x07 & pView->pFirstVPort->ubBpp) << 12) | BV(9); // BPP + composite output
+			g_pCustom->bplcon0 = ((0x07 & pView->pFirstVPort->ubBpp) << 12) | BV(9) | BV(0); // BPP + composite output + ECSENA
 			if (pView->pFirstVPort->ubBpp & 0x08) {
 				g_pCustom->bplcon0 |= BV(4);
 			}
 			if ( pView->pFirstVPort->ubBpp == 6) {
-			
 				g_pCustom->bplcon2 = BV(9);  // Set KillEHB flag, since we have declared out viewport to be aga, and 64 colours.
+			}
+			else {
+				g_pCustom->bplcon2 = 0;
 			}
 		}
 		else
@@ -292,21 +289,23 @@ void viewLoad(tView *pView)
 			g_pCustom->bplcon0 = (pView->pFirstVPort->ubBpp << 12) | BV(9); // BPP + composite output
 			g_pCustom->bplcon2 = 0; // No need to KILLEHB because we are not AGA, so just blank the flag.
 		}
-		g_pCustom->fmode = pView->pFirstVPort->ubFmode;        // AGA fix
-		g_pCustom->bplcon3 = 0;      // AGA fix
+		if(systemIsAga()) {
+			g_pCustom->fmode = pView->pFirstVPort->ubFmode;
+			g_pCustom->bplcon3 = 0;
+		}
 #else
 			g_pCustom->bplcon0 = (pView->pFirstVPort->ubBpp << 12) | BV(9); // BPP + composite output
 			g_pCustom->bplcon2 = 0; // No need to KILLEHB because we are not AGA, so just blank the flag.
-			g_pCustom->fmode = 0;        // AGA fix
-			g_pCustom->bplcon3 = 0;      // AGA fix
 
 #endif
 		g_pCustom->diwstrt = (pView->ubPosY << 8) | 0x81; // HSTART: 0x81
-		g_pCustom->bplcon4 = 0x0011; // AGA fix
+		if(systemIsAga()) {
+			g_pCustom->bplcon4 = 0x0011;
+		}
 		UWORD uwDiwStartX = pView->ubPosX;
 		UWORD uwDiwStopX = uwDiwStartX + pView->uwWidth - 256;
 		UWORD uwDiwStopY = pView->ubPosY + pView->uwHeight;
-		
+
 		if(BTST(uwDiwStopY, 8) == BTST(uwDiwStopY, 7)) {
 			logWrite(
 				"ERR: DiwStopY (%hu) bit 8 (%hhu) must be different than bit 7 (%hhu)\n",
@@ -316,6 +315,11 @@ void viewLoad(tView *pView)
 		g_pCustom->diwstrt = (pView->ubPosY << 8) | uwDiwStartX; // HSTART: 0x81
 		g_pCustom->diwstop = ((uwDiwStopY & 0xFF) << 8) | uwDiwStopX; // HSTOP: 0xC1
 		viewUpdateGlobalPalette(pView);
+#ifdef ACE_USE_AGA_FEATURES
+		if(systemIsAga()) {
+			g_pCustom->bplcon3 = 0;
+		}
+#endif
 	}
 	copProcessBlocks();
 	g_pCustom->copjmp1 = 1;
@@ -375,14 +379,14 @@ tVPort *vPortCreate(void *pTagList, ...)
 #ifdef ACE_USE_AGA_FEATURES
 if(
 	tagGet(pTagList, vaTags, TAG_VPORT_USES_AGA, 0) ||
-	((pView->uwFlags & VIEW_FLAG_GLOBAL_AGA) && pPrevVPort && pPrevVPort->eFlags & VP_FLAG_AGA)
+	(pView->uwFlags & VIEW_FLAG_GLOBAL_AGA)
 ) {
 	pVPort->eFlags |= VP_FLAG_AGA;
 }
 	const UBYTE ubDefaultFmode = 0;
 	pVPort->ubFmode = tagGet(pTagList, vaTags, TAG_VPORT_FMODE, ubDefaultFmode);
 #endif
-	
+
 	// Get dimensions
 	// FIXME: this doesn't work correctly due to diwstrt/stop being set globally
 	// in view, but is needed for vport manger bitmap default size calcs.
@@ -427,8 +431,8 @@ if(
 	// Allocate memory for the palette;
 #ifdef ACE_USE_AGA_FEATURES
 	if (pVPort->eFlags & VP_FLAG_AGA) {
-		// AGA uses 24 bit palette entries. 		
-		pVPort->pPalette = memAllocFastClear(sizeof(ULONG) * (1 << pVPort->ubBpp)); 
+		// AGA uses 24 bit palette entries.
+		pVPort->pPalette = memAllocFastClear(sizeof(ULONG) * (1 << pVPort->ubBpp));
 		UWORD *pSrcPalette = (UWORD *)tagGet(pTagList, vaTags, TAG_VPORT_PALETTE_PTR, 0);
 		if (pSrcPalette)
 		{
@@ -446,13 +450,13 @@ if(
 				memcpy(pVPort->pPalette, pSrcPalette, uwPaletteSize * sizeof(ULONG));
 			}
 		}
-	} 
+	}
 	else
 #endif
 	{
 		// 12 bit palette entries for Non-AGA
-		pVPort->pPalette = memAllocFastClear(sizeof(UWORD) * 32); 
-	
+		pVPort->pPalette = memAllocFastClear(sizeof(UWORD) * 32);
+
 		UWORD *pSrcPalette = (UWORD *)tagGet(pTagList, vaTags, TAG_VPORT_PALETTE_PTR, 0);
 		if (pSrcPalette)
 		{
@@ -520,19 +524,19 @@ void vPortDestroy(tVPort *pVPort)
 #ifdef ACE_USE_AGA_FEATURES
 			if (pView->pFirstVPort->eFlags & VP_FLAG_AGA)
 			{
-				// AGA uses 24 bit palette entries. 
+				// AGA uses 24 bit palette entries.
 				memFree(pVPort->pPalette, sizeof(ULONG) * (1 << pVPort->ubBpp));
 			}
 			else
 			{
 				// 12 bit palette entries for Non-AGA
-				memFree(pVPort->pPalette, sizeof(UWORD) * (32)); 
+				memFree(pVPort->pPalette, sizeof(UWORD) * (32));
 			}
 #else
 			// 12 bit palette entries for Non-AGA
-			memFree(pVPort->pPalette, sizeof(UWORD) * (32)); 
+			memFree(pVPort->pPalette, sizeof(UWORD) * (32));
 #endif
-			
+
 			// Free stuff
 			memFree(pVPort, sizeof(tVPort));
 			break;

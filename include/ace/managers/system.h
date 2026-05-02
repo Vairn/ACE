@@ -80,6 +80,11 @@ UBYTE systemGetVerticalBlankFrequency(void);
 
 UBYTE systemIsPal(void);
 
+/**
+ * @brief Returns non-zero when graphics.library reports an AGA chipset.
+ */
+UBYTE systemIsAga(void);
+
 void systemCheckStack(void);
 
 /**
