@@ -4,30 +4,30 @@
         {
             "type": "amiga",
             "request": "launch",
-            "preLaunchTask": "compile diagnostics",
+            "preLaunchTask": "compile diagnostics (OCS)",
             "name": "Diagnostics: Amiga 500",
             "config": "A500",
-            "program": "${workspaceFolder}/${config:amiga.program}",
+            "program": "${workspaceFolder}/diagnostics/build-ocs/diagnostics",
             "kickstart": "${config:amiga.rom-paths.A500}",
             "internalConsoleOptions": "openOnSessionStart"
         },
         {
             "type": "amiga",
             "request": "launch",
-            "preLaunchTask": "compile diagnostics",
+            "preLaunchTask": "compile diagnostics (AGA)",
             "name": "Diagnostics: Amiga 1200",
             "config": "A1200",
-            "program": "${workspaceFolder}/${config:amiga.program}",
+            "program": "${workspaceFolder}/diagnostics/build-aga/diagnostics",
             "kickstart": "${config:amiga.rom-paths.A1200}",
             "internalConsoleOptions": "openOnSessionStart"
         },
         {
             "type": "amiga",
             "request": "launch",
-            "preLaunchTask": "compile diagnostics",
+            "preLaunchTask": "compile diagnostics (AGA)",
             "name": "Diagnostics: Amiga 1200 + Fast",
             "config": "A1200-FAST",
-            "program": "${workspaceFolder}/${config:amiga.program}",
+            "program": "${workspaceFolder}/diagnostics/build-aga/diagnostics",
             "kickstart": "${config:amiga.rom-paths.A1200}",
             "internalConsoleOptions": "openOnSessionStart"
         }

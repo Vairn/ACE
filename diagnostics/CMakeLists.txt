@@ -19,7 +19,6 @@ include_directories(${PROJECT_SOURCE_DIR}/src)
 set(RES_DIR ${CMAKE_CURRENT_LIST_DIR}/res)
 set(DATA_DIR ${CMAKE_CURRENT_BINARY_DIR}/data)
 
-set(ACE_USE_AGA_FEATURES ON CACHE BOOL "" FORCE)
 add_subdirectory(.. ace)
 include_directories(../include)
 

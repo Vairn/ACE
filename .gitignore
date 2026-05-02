@@ -5,6 +5,8 @@
 ace\.code-workspace
 
 build/
+build-ocs/
+build-aga/
 lib/
 bin/
 

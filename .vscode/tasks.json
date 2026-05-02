@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "compile diagnostics",
+            "label": "compile diagnostics (OCS)",
             "type": "shell",
             "command": "make",
             "options": {
@@ -30,6 +30,33 @@
                 "kind": "build",
                 "isDefault": true
             }
+        },
+        {
+            "label": "compile diagnostics (AGA)",
+            "type": "shell",
+            "command": "make",
+            "options": {
+                "cwd": "${workspaceFolder}/diagnostics",
+                "env": {
+                    "PATH": "${env:PATH}:${command:amiga.bin-path}/opt/bin:${command:amiga.bin-path}"
+                }
+            },
+            "args": ["-j4", "AGA=1"],
+            "problemMatcher": [
+                {
+                    "base": "$gcc",
+                    "fileLocation": "absolute"
+                }
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "silent",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true
+            },
+            "group": "build"
         },
         {
             "label": "clean diagnostics",

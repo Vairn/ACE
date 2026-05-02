@@ -5,7 +5,16 @@ TOOLCHAIN_BIN := $(BARTMAN_BIN)/opt/bin
 TOOLCHAIN_PATH ?= $(BARTMAN_BIN)/opt
 TOOLCHAIN_CMAKE ?= $(HOME)/Amiga/games/miami-quack-82/deps/AmigaCMakeCrossToolchains/m68k-bartman.cmake
 
-BUILD_DIR := build
+ifdef AGA
+BUILD_DIR := build-aga
+AGA_FLAG := ON
+else
+BUILD_DIR := build-ocs
+AGA_FLAG := OFF
+endif
+
+M68K_CPU := 68000
+
 GAME_ELF := $(BUILD_DIR)/diagnostics.elf
 GAME_EXE := $(BUILD_DIR)/diagnostics.exe
 
@@ -24,10 +33,11 @@ $(BUILD_DIR)/Makefile: CMakeLists.txt
 		-DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN_CMAKE) \
 		-DTOOLCHAIN_PATH=$(TOOLCHAIN_PATH) \
 		-DTOOLCHAIN_PREFIX=m68k-amiga-elf \
-		-DM68K_CPU=68000 \
+		-DM68K_CPU=$(M68K_CPU) \
+		-DACE_USE_AGA_FEATURES=$(AGA_FLAG) \
 		-DCMAKE_BUILD_TYPE=Debug
 
 configure: $(BUILD_DIR)/Makefile
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf build-ocs build-aga
