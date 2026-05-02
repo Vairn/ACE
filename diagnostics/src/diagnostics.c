@@ -7,62 +7,79 @@ typedef struct tDiagnosticDef {
 	UBYTE ubFmode;
 	UBYTE isEhb;
 	UBYTE isAga;
+	tStateCb cbCreate;
+	tStateCb cbLoop;
+	tStateCb cbDestroy;
 } tDiagnosticDef;
 
-static const tDiagnosticDef s_pDiagnostics[DIAG_TEST_COUNT] = {
-	[DIAG_TEST_SIMPLE_BPP_2] = {"SimpleBuffer 2 BPP", 2, 0, 0, 0},
-	[DIAG_TEST_SIMPLE_BPP_3] = {"SimpleBuffer 3 BPP", 3, 0, 0, 0},
-	[DIAG_TEST_SIMPLE_BPP_4] = {"SimpleBuffer 4 BPP", 4, 0, 0, 0},
-	[DIAG_TEST_SIMPLE_BPP_5] = {"SimpleBuffer 5 BPP", 5, 0, 0, 0},
-	[DIAG_TEST_SIMPLE_BPP_5_EHB] = {"SimpleBuffer 5 BPP EHB", 6, 0, 1, 0},
-#ifdef ACE_USE_AGA_FEATURES
-	[DIAG_TEST_SIMPLE_AGA_BPP_6_FMODE_0] = {"SimpleBuffer AGA 6 BPP FMODE 0", 6, 0, 0, 1},
-	[DIAG_TEST_SIMPLE_AGA_BPP_6_FMODE_1] = {"SimpleBuffer AGA 6 BPP FMODE 1", 6, 1, 0, 1},
-	[DIAG_TEST_SIMPLE_AGA_BPP_6_FMODE_2] = {"SimpleBuffer AGA 6 BPP FMODE 2", 6, 2, 0, 1},
-	[DIAG_TEST_SIMPLE_AGA_BPP_6_FMODE_3] = {"SimpleBuffer AGA 6 BPP FMODE 3", 6, 3, 0, 1},
-	[DIAG_TEST_SIMPLE_AGA_BPP_7_FMODE_0] = {"SimpleBuffer AGA 7 BPP FMODE 0", 7, 0, 0, 1},
-	[DIAG_TEST_SIMPLE_AGA_BPP_7_FMODE_1] = {"SimpleBuffer AGA 7 BPP FMODE 1", 7, 1, 0, 1},
-	[DIAG_TEST_SIMPLE_AGA_BPP_7_FMODE_2] = {"SimpleBuffer AGA 7 BPP FMODE 2", 7, 2, 0, 1},
-	[DIAG_TEST_SIMPLE_AGA_BPP_7_FMODE_3] = {"SimpleBuffer AGA 7 BPP FMODE 3", 7, 3, 0, 1},
-	[DIAG_TEST_SIMPLE_AGA_BPP_8_FMODE_0] = {"SimpleBuffer AGA 8 BPP FMODE 0", 8, 0, 0, 1},
-	[DIAG_TEST_SIMPLE_AGA_BPP_8_FMODE_1] = {"SimpleBuffer AGA 8 BPP FMODE 1", 8, 1, 0, 1},
-	[DIAG_TEST_SIMPLE_AGA_BPP_8_FMODE_2] = {"SimpleBuffer AGA 8 BPP FMODE 2", 8, 2, 0, 1},
-	[DIAG_TEST_SIMPLE_AGA_BPP_8_FMODE_3] = {"SimpleBuffer AGA 8 BPP FMODE 3", 8, 3, 0, 1},
-#endif
-};
-
-#define DIAG_SIMPLE_STATE { \
-	.cbCreate = diagSimpleBufferBppCreate, \
-	.cbLoop = diagSimpleBufferBppLoop, \
-	.cbDestroy = diagSimpleBufferBppDestroy, \
+#define DIAG_SIMPLE_BUFFER(szName, ubBpp, ubFmode, isEhb, isAga) { \
+	szName, ubBpp, ubFmode, isEhb, isAga, \
+	diagSimpleBufferBppCreate, diagSimpleBufferBppLoop, diagSimpleBufferBppDestroy \
 }
 
-tStateManager *g_pDiagStateManager = 0;
-tState g_pDiagStates[DIAG_TEST_COUNT] = {
-	[DIAG_TEST_SIMPLE_BPP_2] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_BPP_3] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_BPP_4] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_BPP_5] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_BPP_5_EHB] = DIAG_SIMPLE_STATE,
+static const tDiagnosticDef s_pDiagnostics[] = {
+	DIAG_SIMPLE_BUFFER("SimpleBuffer 2 BPP", 2, 0, 0, 0),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer 3 BPP", 3, 0, 0, 0),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer 4 BPP", 4, 0, 0, 0),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer 5 BPP", 5, 0, 0, 0),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer 5 BPP EHB", 6, 0, 1, 0),
 #ifdef ACE_USE_AGA_FEATURES
-	[DIAG_TEST_SIMPLE_AGA_BPP_6_FMODE_0] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_AGA_BPP_6_FMODE_1] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_AGA_BPP_6_FMODE_2] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_AGA_BPP_6_FMODE_3] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_AGA_BPP_7_FMODE_0] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_AGA_BPP_7_FMODE_1] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_AGA_BPP_7_FMODE_2] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_AGA_BPP_7_FMODE_3] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_AGA_BPP_8_FMODE_0] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_AGA_BPP_8_FMODE_1] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_AGA_BPP_8_FMODE_2] = DIAG_SIMPLE_STATE,
-	[DIAG_TEST_SIMPLE_AGA_BPP_8_FMODE_3] = DIAG_SIMPLE_STATE,
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 6 BPP FMODE 0", 6, 0, 0, 1),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 6 BPP FMODE 1", 6, 1, 0, 1),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 6 BPP FMODE 2", 6, 2, 0, 1),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 6 BPP FMODE 3", 6, 3, 0, 1),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 7 BPP FMODE 0", 7, 0, 0, 1),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 7 BPP FMODE 1", 7, 1, 0, 1),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 7 BPP FMODE 2", 7, 2, 0, 1),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 7 BPP FMODE 3", 7, 3, 0, 1),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 8 BPP FMODE 0", 8, 0, 0, 1),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 8 BPP FMODE 1", 8, 1, 0, 1),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 8 BPP FMODE 2", 8, 2, 0, 1),
+	DIAG_SIMPLE_BUFFER("SimpleBuffer AGA 8 BPP FMODE 3", 8, 3, 0, 1),
 #endif
 };
 
-static UBYTE s_ubCurrentTest = DIAG_TEST_SIMPLE_BPP_2;
+tStateManager *g_pDiagStateManager = 0;
+static UBYTE s_ubCurrentTest = 0;
 static tFont *s_pFont;
 static tTextBitMap *s_pTextBitMap;
+static UBYTE s_isCurrentTestCreated = 0;
+
+#define DIAG_TEST_COUNT (sizeof(s_pDiagnostics) / sizeof(s_pDiagnostics[0]))
+
+static void diagnosticsRunnerCreate(void);
+static void diagnosticsRunnerLoop(void);
+static void diagnosticsRunnerDestroy(void);
+
+static tState s_sDiagnosticsRunnerState = {
+	.cbCreate = diagnosticsRunnerCreate,
+	.cbLoop = diagnosticsRunnerLoop,
+	.cbDestroy = diagnosticsRunnerDestroy,
+};
+
+static void diagnosticsCreateCurrentTest(void) {
+	s_pDiagnostics[s_ubCurrentTest].cbCreate();
+	s_isCurrentTestCreated = 1;
+}
+
+static void diagnosticsDestroyCurrentTest(void) {
+	if(s_isCurrentTestCreated) {
+		s_pDiagnostics[s_ubCurrentTest].cbDestroy();
+		s_isCurrentTestCreated = 0;
+	}
+}
+
+static void diagnosticsRunnerCreate(void) {
+	diagnosticsCreateCurrentTest();
+}
+
+static void diagnosticsRunnerLoop(void) {
+	s_pDiagnostics[s_ubCurrentTest].cbLoop();
+}
+
+static void diagnosticsRunnerDestroy(void) {
+	diagnosticsDestroyCurrentTest();
+}
 
 void diagnosticsCreate(void) {
 	s_pFont = fontCreateFromPath("data/fonts/quaver.fnt");
@@ -76,9 +93,14 @@ void diagnosticsDestroy(void) {
 	fontDestroy(s_pFont);
 }
 
-void diagnosticsChangeTo(UBYTE ubTest) {
-	s_ubCurrentTest = ubTest % DIAG_TEST_COUNT;
-	stateChange(g_pDiagStateManager, &g_pDiagStates[s_ubCurrentTest]);
+void diagnosticsStart(void) {
+	stateChange(g_pDiagStateManager, &s_sDiagnosticsRunnerState);
+}
+
+void diagnosticsChangeTo(UBYTE ubTestIndex) {
+	diagnosticsDestroyCurrentTest();
+	s_ubCurrentTest = ubTestIndex % DIAG_TEST_COUNT;
+	diagnosticsCreateCurrentTest();
 }
 
 void diagnosticsNextTest(void) {

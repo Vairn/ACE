@@ -11,7 +11,7 @@ void genericCreate(void) {
 	keyCreate();
 	diagnosticsCreate();
 	systemUnuse();
-	diagnosticsChangeTo(DIAG_TEST_SIMPLE_BPP_2);
+	diagnosticsStart();
 }
 
 void genericProcess(void) {
