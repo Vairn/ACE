@@ -1,0 +1,11 @@
+{
+    "includePath": [
+        "${workspaceFolder}/diagnostics/src",
+        "${workspaceFolder}/include"
+    ],
+    "defines": ["BARTMAN_GCC"],
+    "shrinkler": {
+        "fast": "-h -o -1",
+        "slow": "-h -f dff180 -9"
+    }
+}
