@@ -4,9 +4,7 @@
 !.vscode/*.json
 ace\.code-workspace
 
-build/
-build-ocs/
-build-aga/
+build*/
 lib/
 bin/
 

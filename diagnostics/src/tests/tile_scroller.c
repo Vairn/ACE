@@ -14,7 +14,7 @@
 
 #define TILE_SIZE 16
 #define TILE_SHIFT 4
-#define TILE_COUNT 16
+#define TILE_COUNT 8
 #define MAP_TILES_X 64
 #define MAP_TILES_Y 64
 #define HUD_HEIGHT 36
@@ -49,29 +49,67 @@ static tVPort *s_pTileVPort;
 static tSimpleBufferManager *s_pHudBuffer;
 static tTileBufferManager *s_pTileBuffer;
 static tBitMap *s_pTileset;
-static UBYTE s_ubBpp = 4;
+static UBYTE s_ubBpp = 5;
 static UBYTE s_ubFmode = 0;
 static UBYTE s_isBobsEnabled = 1;
-static UBYTE s_isDblBuf = 0;
+static UBYTE s_isDblBuf = 1;
 static UBYTE s_isManualMove = 0;
 static ULONG s_ulMoveStart;
 static tDiagBob s_pBobs[BOB_COUNT];
 
 static UWORD makePaletteColor(UWORD uwIndex, UWORD uwColorCount) {
-	UBYTE ubStep = uwColorCount > 1 ? (15 * uwIndex) / (uwColorCount - 1) : 0;
-	UBYTE ubR = ubStep;
-	UBYTE ubG = (uwIndex * 5) & 0x0F;
-	UBYTE ubB = 15 - ubStep;
+	UWORD uwLastColor = uwColorCount - 1;
+	UWORD uwSplit = uwLastColor / 2;
+
+	if(uwIndex == 0) {
+		return 0x000;
+	}
+	if(uwIndex == uwLastColor) {
+		return 0xFFF;
+	}
+	if(uwIndex <= uwSplit) {
+		UBYTE ubStep = uwSplit > 1 ? (15 * (uwIndex - 1)) / (uwSplit - 1) : 8;
+		UBYTE ubR = ubStep / 4;
+		UBYTE ubG = 2 + ubStep / 3;
+		UBYTE ubB = 7 + ubStep / 2;
+
+		return (ubR << 8) | (ubG << 4) | ubB;
+	}
+
+	UWORD uwBobSpan = uwLastColor - uwSplit - 1;
+	UBYTE ubStep = uwBobSpan ? (15 * (uwIndex - uwSplit - 1)) / uwBobSpan : 8;
+	UBYTE ubR = 8 + ubStep / 2;
+	UBYTE ubG = ubStep / 5;
+	UBYTE ubB = 3 + ubStep / 3;
 
 	return (ubR << 8) | (ubG << 4) | ubB;
 }
 
 #ifdef ACE_USE_AGA_FEATURES
 static ULONG makePaletteColorAga(UWORD uwIndex, UWORD uwColorCount) {
-	UBYTE ubStep = uwColorCount > 1 ? (255 * uwIndex) / (uwColorCount - 1) : 0;
-	UBYTE ubR = ubStep;
-	UBYTE ubG = (uwIndex * 37) & 0xFF;
-	UBYTE ubB = 255 - ubStep;
+	UWORD uwLastColor = uwColorCount - 1;
+	UWORD uwSplit = uwLastColor / 2;
+
+	if(uwIndex == 0) {
+		return 0x000000;
+	}
+	if(uwIndex == uwLastColor) {
+		return 0xFFFFFF;
+	}
+	if(uwIndex <= uwSplit) {
+		UBYTE ubStep = uwSplit > 1 ? (255 * (uwIndex - 1)) / (uwSplit - 1) : 128;
+		UBYTE ubR = ubStep / 4;
+		UBYTE ubG = 32 + ubStep / 3;
+		UBYTE ubB = 112 + ubStep / 2;
+
+		return ((ULONG)ubR << 16) | ((ULONG)ubG << 8) | ubB;
+	}
+
+	UWORD uwBobSpan = uwLastColor - uwSplit - 1;
+	UBYTE ubStep = uwBobSpan ? (255 * (uwIndex - uwSplit - 1)) / uwBobSpan : 128;
+	UBYTE ubR = 128 + ubStep / 2;
+	UBYTE ubG = ubStep / 5;
+	UBYTE ubB = 48 + ubStep / 3;
 
 	return ((ULONG)ubR << 16) | ((ULONG)ubG << 8) | ubB;
 }
@@ -100,26 +138,7 @@ static void setupPalette(void) {
 	s_pHudVPort->pPalette[uwColorCount - 1] = 0xFFF;
 }
 
-static UWORD getTextWidth(const char *szText) {
-	UWORD uwWidth = 0;
-	const tFont *pFont = diagnosticsGetFont();
-
-	while(*szText) {
-		uwWidth += fontGlyphWidth(pFont, *szText);
-		++szText;
-	}
-	return uwWidth;
-}
-
 static void drawHeaderLine(UWORD uwY, const char *szText, UBYTE ubTextColor) {
-	UWORD uwTextWidth = getTextWidth(szText);
-	UWORD uwBackWidth = uwTextWidth + 8;
-	UWORD uwMaxWidth = s_pHudBuffer->uBfrBounds.uwX - 4;
-
-	if(uwBackWidth > uwMaxWidth) {
-		uwBackWidth = uwMaxWidth;
-	}
-	blitRect(s_pHudBuffer->pBack, 2, uwY - 1, uwBackWidth, 9, 0);
 	fontDrawStr(
 		diagnosticsGetFont(), s_pHudBuffer->pBack, 4, uwY,
 		szText, ubTextColor, FONT_LEFT | FONT_TOP, diagnosticsGetTextBitMap()
@@ -132,7 +151,7 @@ static void drawHeader(void) {
 
 	blitRect(
 		s_pHudBuffer->pBack, 0, 0,
-		s_pHudBuffer->uBfrBounds.uwX, s_pHudBuffer->uBfrBounds.uwY, 1
+		s_pHudBuffer->uBfrBounds.uwX, s_pHudBuffer->uBfrBounds.uwY, 0
 	);
 	sprintf(
 		szLine, "TILEBUFFER %s BPP %u FMODE %u BOBS %s DBLBUF %s",
@@ -148,10 +167,10 @@ static void drawHeader(void) {
 
 static void drawTile(UWORD uwTile, UBYTE ubBaseColor) {
 	UWORD uwY = uwTile * TILE_SIZE;
-	UBYTE ubMaxColor = (1 << s_ubBpp) - 1;
-	UBYTE ubColorA = 1 + (ubBaseColor % ubMaxColor);
-	UBYTE ubColorB = 1 + ((ubBaseColor + 3) % ubMaxColor);
-	UBYTE ubColorC = 1 + ((ubBaseColor + 7) % ubMaxColor);
+	UBYTE ubBlueColorCount = ((1 << s_ubBpp) - 1) / 2;
+	UBYTE ubColorA = 1 + (ubBaseColor % ubBlueColorCount);
+	UBYTE ubColorB = 1 + ((ubBaseColor + 2) % ubBlueColorCount);
+	UBYTE ubColorC = 1 + ((ubBaseColor + 4) % ubBlueColorCount);
 
 	blitRect(s_pTileset, 0, uwY, TILE_SIZE, TILE_SIZE, ubColorA);
 	blitRect(s_pTileset, 0, uwY, TILE_SIZE, 1, ubColorC);
@@ -189,8 +208,13 @@ static void fillTileMap(void) {
 
 static UBYTE getBobColor(UBYTE ubSeed) {
 	UBYTE ubMaxColor = (1 << s_ubBpp) - 1;
+	UBYTE ubFirstBobColor = ubMaxColor / 2 + 1;
+	UBYTE ubBobColorCount = ubMaxColor - ubFirstBobColor;
 
-	return 1 + (ubSeed % ubMaxColor);
+	if(!ubBobColorCount) {
+		return ubFirstBobColor;
+	}
+	return ubFirstBobColor + (ubSeed % ubBobColorCount);
 }
 
 static void drawBobFrame(tDiagBob *pBob, UBYTE ubSeed) {
