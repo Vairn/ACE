@@ -17,7 +17,7 @@
 #define TILE_COUNT 8
 #define MAP_TILES_X 64
 #define MAP_TILES_Y 64
-#define HUD_HEIGHT 36
+#define HUD_HEIGHT 32
 #define BOB_COUNT 5
 
 typedef enum tMovePattern {
@@ -318,8 +318,10 @@ static void updateBobPositions(void) {
 	}
 }
 
-static void processBobs(void) {
+static void processTileScroller(void) {
+	bobSetCurrentBuffer(s_pTileBuffer->pScroll->pBack);
 	bobBegin(s_pTileBuffer->pScroll->pBack);
+	tileBufferProcess(s_pTileBuffer);
 	if(s_isBobsEnabled) {
 		updateBobPositions();
 		for(UBYTE i = 0; i < BOB_COUNT; ++i) {
@@ -328,6 +330,8 @@ static void processBobs(void) {
 	}
 	bobPushingDone();
 	bobEnd();
+	scrollBufferProcess(s_pTileBuffer->pScroll);
+	cameraProcess(s_pTileBuffer->pCamera);
 }
 
 static void createView(void) {
@@ -576,8 +580,7 @@ void diagTileScrollerLoop(void) {
 		getAutoMove(&wDx, &wDy);
 	}
 	cameraMoveBy(s_pTileBuffer->pCamera, wDx, wDy);
-	viewProcessManagers(s_pView);
-	processBobs();
+	processTileScroller();
 	copProcessBlocks();
 	vPortWaitForEnd(s_pTileVPort);
 }
