@@ -195,12 +195,14 @@ static UBYTE getBobColor(UBYTE ubSeed) {
 
 static void drawBobFrame(tDiagBob *pBob, UBYTE ubSeed) {
 	UWORD uwSize = pBob->uwSize;
+	UWORD uwSourceHeight = uwSize + 1;
 	UBYTE ubColorA = getBobColor(ubSeed);
 	UBYTE ubColorB = getBobColor(ubSeed + 3);
 	UBYTE ubColorC = getBobColor(ubSeed + 7);
+	UBYTE ubMaskColor = (1 << s_ubBpp) - 1;
 
-	blitRect(pBob->pFrame, 0, 0, uwSize, uwSize, 0);
-	blitRect(pBob->pMask, 0, 0, uwSize, uwSize, 1);
+	blitRect(pBob->pFrame, 0, 0, uwSize, uwSourceHeight, 0);
+	blitRect(pBob->pMask, 0, 0, uwSize, uwSourceHeight, ubMaskColor);
 	blitRect(pBob->pFrame, 0, 0, uwSize, uwSize, ubColorA);
 	blitRect(pBob->pFrame, 0, 0, uwSize, 1, ubColorC);
 	blitRect(pBob->pFrame, 0, uwSize - 1, uwSize, 1, ubColorC);
@@ -228,8 +230,8 @@ static void initDiagBob(
 	pBob->wScreenY = wY;
 	pBob->wDx = wDx;
 	pBob->wDy = wDy;
-	pBob->pFrame = bitmapCreate(uwSize, uwSize, s_ubBpp, BMF_CLEAR | BMF_INTERLEAVED);
-	pBob->pMask = bitmapCreate(uwSize, uwSize, 1, BMF_CLEAR | BMF_INTERLEAVED);
+	pBob->pFrame = bitmapCreate(uwSize, uwSize + 1, s_ubBpp, BMF_CLEAR | BMF_INTERLEAVED);
+	pBob->pMask = bitmapCreate(uwSize, uwSize + 1, s_ubBpp, BMF_CLEAR | BMF_INTERLEAVED);
 	drawBobFrame(pBob, ubIndex * 5 + 1);
 
 	bobInit(
