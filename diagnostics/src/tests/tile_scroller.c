@@ -161,8 +161,17 @@ static void drawHeader(void) {
 		s_isDblBuf ? "ON" : "OFF"
 	);
 	drawHeaderLine(4, szLine, ubTextColor);
-	drawHeaderLine(14, "SPACE scroll auto/manual  WSAD move  ESC menu", ubTextColor);
-	drawHeaderLine(24, "2-8 bpp  F fmode  B bobs  D dblbuf", ubTextColor);
+	drawHeaderLine(14, "SPACE: scroll auto/manual  WSAD: move  ESC: menu", ubTextColor);
+#ifdef ACE_USE_AGA_FEATURES
+	if(s_ubBpp > 5) {
+		drawHeaderLine(24, "2-8: bpp  Z/X/C/V: fmode 0/1/2/3  B: bobs  D: dblbuf", ubTextColor);
+	}
+	else {
+		drawHeaderLine(24, "2-8: bpp  B: bobs  D: dblbuf", ubTextColor);
+	}
+#else
+	drawHeaderLine(24, "2-5: bpp  B: bobs  D: dblbuf", ubTextColor);
+#endif
 }
 
 static void drawTile(UWORD uwTile, UBYTE ubBaseColor) {
@@ -444,6 +453,18 @@ static void setBpp(UBYTE ubBpp) {
 	recreateView();
 }
 
+static void setFmode(UBYTE ubFmode) {
+#ifdef ACE_USE_AGA_FEATURES
+	if(s_ubBpp <= 5 || s_ubFmode == ubFmode) {
+		return;
+	}
+	s_ubFmode = ubFmode;
+	recreateView();
+#else
+	(void)ubFmode;
+#endif
+}
+
 static void handleConfigKeys(void) {
 	if(keyUse(KEY_2)) {
 		setBpp(2);
@@ -469,12 +490,20 @@ static void handleConfigKeys(void) {
 	}
 #endif
 
-	if(keyUse(KEY_F)) {
 #ifdef ACE_USE_AGA_FEATURES
-		s_ubFmode = (s_ubFmode + 1) & 3;
-		recreateView();
-#endif
+	if(keyUse(KEY_Z)) {
+		setFmode(0);
 	}
+	if(keyUse(KEY_X)) {
+		setFmode(1);
+	}
+	if(keyUse(KEY_C)) {
+		setFmode(2);
+	}
+	if(keyUse(KEY_V)) {
+		setFmode(3);
+	}
+#endif
 	if(!s_isManualMove && keyUse(KEY_D)) {
 		s_isDblBuf = !s_isDblBuf;
 		recreateView();

@@ -13,6 +13,7 @@ static tView *s_pView;
 static tVPort *s_pVPort;
 static tSimpleBufferManager *s_pBuffer;
 static ULONG s_ulAutoAdvanceStart;
+static UBYTE s_isAutoAdvance = 0;
 
 static UWORD makePaletteColor(UWORD uwIndex, UWORD uwColorCount) {
 	UBYTE ubStep = uwColorCount > 1 ? (15 * uwIndex) / (uwColorCount - 1) : 0;
@@ -126,17 +127,31 @@ static void drawHeaderLine(UWORD uwY, const char *szText, UBYTE ubTextColor) {
 
 static void drawHeader(UBYTE ubBpp) {
 	char szTitle[64];
+	char szControls[96];
+	const char *szBppRange;
+	const char *szEhbControl = (ubBpp == 5 || diagnosticsIsCurrentEhb()) ? "T: EHB  " : "";
 	UBYTE ubTextColor = diagnosticsIsCurrentEhb() ? 31 : (1 << ubBpp) - 1;
+
+#ifdef ACE_USE_AGA_FEATURES
+	szBppRange = "2-8";
+#else
+	szBppRange = "2-5";
+#endif
 
 	sprintf(szTitle, "DIAG: %s", diagnosticsGetCurrentName());
 	drawHeaderLine(4, szTitle, ubTextColor);
-	drawHeaderLine(13, "SPACE next  BACKSPACE prev  ESC menu", ubTextColor);
+	sprintf(
+		szControls, "%s: BPP  %sSPACE: AUTO %s  ESC: menu",
+		szBppRange, szEhbControl, s_isAutoAdvance ? "ON" : "OFF"
+	);
+	drawHeaderLine(13, szControls, ubTextColor);
 
 #ifdef ACE_USE_AGA_FEATURES
 	if(diagnosticsIsCurrentAga()) {
-		char szFmode[32];
-		sprintf(szFmode, "FMODE %u", diagnosticsGetCurrentFmode());
-		drawHeaderLine(22, szFmode, ubTextColor);
+		char szMode[96];
+
+		sprintf(szMode, "Z/X/C/V: FMODE 0/1/2/3");
+		drawHeaderLine(22, szMode, ubTextColor);
 	}
 	else
 #endif
@@ -189,7 +204,7 @@ void diagSimpleBufferBppCreate(void) {
 }
 
 void diagSimpleBufferBppLoop(void) {
-	if(timerGetDelta(s_ulAutoAdvanceStart, timerGet()) >= systemGetVerticalBlankFrequency() * 2) {
+	if(s_isAutoAdvance && timerGetDelta(s_ulAutoAdvanceStart, timerGet()) >= systemGetVerticalBlankFrequency() * 2) {
 		diagnosticsNextTest();
 		return;
 	}
@@ -199,13 +214,75 @@ void diagSimpleBufferBppLoop(void) {
 		return;
 	}
 	if(keyUse(KEY_SPACE)) {
-		diagnosticsNextTest();
+		s_isAutoAdvance = !s_isAutoAdvance;
+		s_ulAutoAdvanceStart = timerGet();
+		drawPattern(diagnosticsGetCurrentBpp());
+		drawPaletteSwatches(diagnosticsGetCurrentBpp());
+		drawHeader(diagnosticsGetCurrentBpp());
 		return;
 	}
-	if(keyUse(KEY_BACKSPACE)) {
-		diagnosticsPrevTest();
+	if(keyUse(KEY_2)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsSelectSimpleBufferBpp(2);
 		return;
 	}
+	if(keyUse(KEY_3)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsSelectSimpleBufferBpp(3);
+		return;
+	}
+	if(keyUse(KEY_4)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsSelectSimpleBufferBpp(4);
+		return;
+	}
+	if(keyUse(KEY_5)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsSelectSimpleBufferBpp(5);
+		return;
+	}
+	if(keyUse(KEY_T)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsToggleSimpleBufferEhb();
+		return;
+	}
+#ifdef ACE_USE_AGA_FEATURES
+	if(keyUse(KEY_6)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsSelectSimpleBufferBpp(6);
+		return;
+	}
+	if(keyUse(KEY_7)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsSelectSimpleBufferBpp(7);
+		return;
+	}
+	if(keyUse(KEY_8)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsSelectSimpleBufferBpp(8);
+		return;
+	}
+	if(keyUse(KEY_Z)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsSelectSimpleBufferFmode(0);
+		return;
+	}
+	if(keyUse(KEY_X)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsSelectSimpleBufferFmode(1);
+		return;
+	}
+	if(keyUse(KEY_C)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsSelectSimpleBufferFmode(2);
+		return;
+	}
+	if(keyUse(KEY_V)) {
+		s_ulAutoAdvanceStart = timerGet();
+		diagnosticsSelectSimpleBufferFmode(3);
+		return;
+	}
+#endif
 
 	vPortWaitForEnd(s_pVPort);
 }

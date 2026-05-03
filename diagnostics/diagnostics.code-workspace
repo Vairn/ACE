@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": ".."
+		}
+	],
+	"settings": {
+		"amiga.program": "build-ocs/diagnostics",
+		"[m68k]": {
+			"editor.rulers": []
+		}
+	}
+}

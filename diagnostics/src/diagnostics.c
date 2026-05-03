@@ -53,6 +53,9 @@ static UBYTE s_isCurrentTestCreated = 0;
 static tView *s_pMenuView;
 static tVPort *s_pMenuVPort;
 static tSimpleBufferManager *s_pMenuBuffer;
+#ifdef ACE_USE_AGA_FEATURES
+static UBYTE s_ubPreferredSimpleFmode = 0;
+#endif
 
 typedef enum tDiagnosticsMode {
 	DIAGNOSTICS_MODE_MENU,
@@ -211,6 +214,11 @@ void diagnosticsStart(void) {
 void diagnosticsChangeTo(UBYTE ubTestIndex) {
 	diagnosticsDestroyCurrentTest();
 	s_ubCurrentTest = ubTestIndex % DIAG_TEST_COUNT;
+#ifdef ACE_USE_AGA_FEATURES
+	if(s_pDiagnostics[s_ubCurrentTest].isAga) {
+		s_ubPreferredSimpleFmode = s_pDiagnostics[s_ubCurrentTest].ubFmode;
+	}
+#endif
 	diagnosticsCreateCurrentTest();
 }
 
@@ -236,13 +244,76 @@ void diagnosticsNextTest(void) {
 	diagnosticsChangeTo((s_ubCurrentTest + 1) % DIAG_TEST_COUNT);
 }
 
-void diagnosticsPrevTest(void) {
-	if(s_ubCurrentTest == 0) {
-		diagnosticsChangeTo(DIAG_TEST_COUNT - 1);
+static UBYTE diagnosticsFindSimpleBuffer(UBYTE ubBpp, UBYTE ubFmode) {
+#ifndef ACE_USE_AGA_FEATURES
+	(void)ubFmode;
+#endif
+	for(UBYTE i = 0; i < DIAG_TEST_COUNT; ++i) {
+		if(s_pDiagnostics[i].ubBpp != ubBpp) {
+			continue;
+		}
+		if(s_pDiagnostics[i].isEhb) {
+			continue;
+		}
+#ifdef ACE_USE_AGA_FEATURES
+		if(ubBpp > 5) {
+			if(s_pDiagnostics[i].isAga && s_pDiagnostics[i].ubFmode == ubFmode) {
+				return i;
+			}
+		}
+		else
+#endif
+		if(!s_pDiagnostics[i].isAga) {
+			return i;
+		}
 	}
-	else {
-		diagnosticsChangeTo(s_ubCurrentTest - 1);
+
+	return s_ubCurrentTest;
+}
+
+void diagnosticsSelectSimpleBufferBpp(UBYTE ubBpp) {
+#ifdef ACE_USE_AGA_FEATURES
+	UBYTE ubFmode = s_ubPreferredSimpleFmode;
+#else
+	UBYTE ubFmode = 0;
+#endif
+	UBYTE ubTestIndex = diagnosticsFindSimpleBuffer(ubBpp, ubFmode);
+
+	if(ubTestIndex != s_ubCurrentTest) {
+		diagnosticsChangeTo(ubTestIndex);
 	}
+}
+
+void diagnosticsToggleSimpleBufferEhb(void) {
+	if(s_pDiagnostics[s_ubCurrentTest].isEhb) {
+		diagnosticsSelectSimpleBufferBpp(5);
+		return;
+	}
+	if(s_pDiagnostics[s_ubCurrentTest].ubBpp != 5 || s_pDiagnostics[s_ubCurrentTest].isAga) {
+		return;
+	}
+
+	for(UBYTE i = 0; i < DIAG_TEST_COUNT; ++i) {
+		if(s_pDiagnostics[i].isEhb) {
+			diagnosticsChangeTo(i);
+			return;
+		}
+	}
+}
+
+void diagnosticsSelectSimpleBufferFmode(UBYTE ubFmode) {
+#ifdef ACE_USE_AGA_FEATURES
+	s_ubPreferredSimpleFmode = ubFmode;
+	if(s_pDiagnostics[s_ubCurrentTest].isAga) {
+		UBYTE ubTestIndex = diagnosticsFindSimpleBuffer(s_pDiagnostics[s_ubCurrentTest].ubBpp, ubFmode);
+
+		if(ubTestIndex != s_ubCurrentTest) {
+			diagnosticsChangeTo(ubTestIndex);
+		}
+	}
+#else
+	(void)ubFmode;
+#endif
 }
 
 UBYTE diagnosticsGetCurrentBpp(void) {
