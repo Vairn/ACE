@@ -3,7 +3,7 @@
 BARTMAN_BIN ?= $(HOME)/.vscode/extensions/bartmanabyss.amiga-debug-1.7.9/bin/darwin
 TOOLCHAIN_BIN := $(BARTMAN_BIN)/opt/bin
 TOOLCHAIN_PATH ?= $(BARTMAN_BIN)/opt
-TOOLCHAIN_CMAKE ?= $(HOME)/Amiga/games/miami-quack-82/deps/AmigaCMakeCrossToolchains/m68k-bartman.cmake
+TOOLCHAIN_CMAKE ?= cmake/m68k-bartman.cmake
 
 ifdef AGA
 BUILD_DIR := build-aga
