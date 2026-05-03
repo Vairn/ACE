@@ -1,5 +1,6 @@
 #include "tests/tile_scroller.h"
 #include <ace/managers/blit.h>
+#include <ace/managers/bob.h>
 #include <ace/managers/copper.h>
 #include <ace/managers/key.h>
 #include <ace/managers/system.h>
@@ -17,6 +18,7 @@
 #define MAP_TILES_X 64
 #define MAP_TILES_Y 64
 #define HUD_HEIGHT 36
+#define BOB_COUNT 5
 
 typedef enum tMovePattern {
 	MOVE_RIGHT,
@@ -30,6 +32,17 @@ typedef enum tMovePattern {
 	MOVE_COUNT
 } tMovePattern;
 
+typedef struct tDiagBob {
+	tBob sBob;
+	tBitMap *pFrame;
+	tBitMap *pMask;
+	WORD wScreenX;
+	WORD wScreenY;
+	WORD wDx;
+	WORD wDy;
+	UWORD uwSize;
+} tDiagBob;
+
 static tView *s_pView;
 static tVPort *s_pHudVPort;
 static tVPort *s_pTileVPort;
@@ -38,10 +51,11 @@ static tTileBufferManager *s_pTileBuffer;
 static tBitMap *s_pTileset;
 static UBYTE s_ubBpp = 4;
 static UBYTE s_ubFmode = 0;
-static UBYTE s_isBobsEnabled = 0;
+static UBYTE s_isBobsEnabled = 1;
 static UBYTE s_isDblBuf = 0;
 static UBYTE s_isManualMove = 0;
 static ULONG s_ulMoveStart;
+static tDiagBob s_pBobs[BOB_COUNT];
 
 static UWORD makePaletteColor(UWORD uwIndex, UWORD uwColorCount) {
 	UBYTE ubStep = uwColorCount > 1 ? (15 * uwIndex) / (uwColorCount - 1) : 0;
@@ -173,6 +187,123 @@ static void fillTileMap(void) {
 	}
 }
 
+static UBYTE getBobColor(UBYTE ubSeed) {
+	UBYTE ubMaxColor = (1 << s_ubBpp) - 1;
+
+	return 1 + (ubSeed % ubMaxColor);
+}
+
+static void drawBobFrame(tDiagBob *pBob, UBYTE ubSeed) {
+	UWORD uwSize = pBob->uwSize;
+	UBYTE ubColorA = getBobColor(ubSeed);
+	UBYTE ubColorB = getBobColor(ubSeed + 3);
+	UBYTE ubColorC = getBobColor(ubSeed + 7);
+
+	blitRect(pBob->pFrame, 0, 0, uwSize, uwSize, 0);
+	blitRect(pBob->pMask, 0, 0, uwSize, uwSize, 1);
+	blitRect(pBob->pFrame, 0, 0, uwSize, uwSize, ubColorA);
+	blitRect(pBob->pFrame, 0, 0, uwSize, 1, ubColorC);
+	blitRect(pBob->pFrame, 0, uwSize - 1, uwSize, 1, ubColorC);
+	blitRect(pBob->pFrame, 0, 0, 1, uwSize, ubColorC);
+	blitRect(pBob->pFrame, uwSize - 1, 0, 1, uwSize, ubColorC);
+
+	if(uwSize == 16) {
+		blitLine(pBob->pFrame, 3, 3, 12, 12, ubColorB, 0xFFFF, 0);
+		blitLine(pBob->pFrame, 12, 3, 3, 12, ubColorB, 0xFFFF, 0);
+	}
+	else {
+		blitRect(pBob->pFrame, 8, 8, 16, 16, ubColorB);
+		blitLine(pBob->pFrame, 4, 4, 27, 27, ubColorC, 0xFFFF, 0);
+		blitLine(pBob->pFrame, 27, 4, 4, 27, ubColorC, 0xFFFF, 0);
+	}
+}
+
+static void initDiagBob(
+	UBYTE ubIndex, UWORD uwSize, WORD wX, WORD wY, WORD wDx, WORD wDy
+) {
+	tDiagBob *pBob = &s_pBobs[ubIndex];
+
+	pBob->uwSize = uwSize;
+	pBob->wScreenX = wX;
+	pBob->wScreenY = wY;
+	pBob->wDx = wDx;
+	pBob->wDy = wDy;
+	pBob->pFrame = bitmapCreate(uwSize, uwSize, s_ubBpp, BMF_CLEAR | BMF_INTERLEAVED);
+	pBob->pMask = bitmapCreate(uwSize, uwSize, 1, BMF_CLEAR | BMF_INTERLEAVED);
+	drawBobFrame(pBob, ubIndex * 5 + 1);
+
+	bobInit(
+		&pBob->sBob, uwSize, uwSize, 1,
+		bobCalcFrameAddress(pBob->pFrame, 0),
+		bobCalcFrameAddress(pBob->pMask, 0),
+		wX, wY
+	);
+}
+
+static void createBobs(void) {
+	bobManagerCreate(
+		s_pTileBuffer->pScroll->pFront,
+		s_pTileBuffer->pScroll->pBack,
+		s_pTileBuffer->pScroll->uwBmAvailHeight
+	);
+	initDiagBob(0, 16, 24, 24, 1, 0);
+	initDiagBob(1, 16, 96, 48, 0, 1);
+	initDiagBob(2, 16, 168, 72, 1, 1);
+	initDiagBob(3, 16, 248, 104, -1, 1);
+	initDiagBob(4, 32, 128, 132, 1, -1);
+	bobReallocateBuffers();
+	bobDiscardUndraw();
+}
+
+static void destroyBobs(void) {
+	bobManagerDestroy();
+	for(UBYTE i = 0; i < BOB_COUNT; ++i) {
+		bitmapDestroy(s_pBobs[i].pFrame);
+		bitmapDestroy(s_pBobs[i].pMask);
+		s_pBobs[i].pFrame = 0;
+		s_pBobs[i].pMask = 0;
+	}
+}
+
+static void updateBobPositions(void) {
+	UWORD uwMaxX = s_pTileVPort->uwWidth;
+	UWORD uwMaxY = s_pTileVPort->uwHeight;
+	UWORD uwCameraX = s_pTileBuffer->pCamera->uPos.uwX;
+	UWORD uwCameraY = s_pTileBuffer->pCamera->uPos.uwY;
+
+	for(UBYTE i = 0; i < BOB_COUNT; ++i) {
+		tDiagBob *pBob = &s_pBobs[i];
+		WORD wMaxX = uwMaxX - pBob->uwSize;
+		WORD wMaxY = uwMaxY - pBob->uwSize;
+
+		pBob->wScreenX += pBob->wDx;
+		pBob->wScreenY += pBob->wDy;
+		if(pBob->wScreenX <= 0 || pBob->wScreenX >= wMaxX) {
+			pBob->wDx = -pBob->wDx;
+			pBob->wScreenX += pBob->wDx;
+		}
+		if(pBob->wScreenY <= 0 || pBob->wScreenY >= wMaxY) {
+			pBob->wDy = -pBob->wDy;
+			pBob->wScreenY += pBob->wDy;
+		}
+
+		pBob->sBob.sPos.uwX = uwCameraX + pBob->wScreenX;
+		pBob->sBob.sPos.uwY = uwCameraY + pBob->wScreenY;
+	}
+}
+
+static void processBobs(void) {
+	bobBegin(s_pTileBuffer->pScroll->pBack);
+	if(s_isBobsEnabled) {
+		updateBobPositions();
+		for(UBYTE i = 0; i < BOB_COUNT; ++i) {
+			bobPush(&s_pBobs[i].sBob);
+		}
+	}
+	bobPushingDone();
+	bobEnd();
+}
+
 static void createView(void) {
 #ifdef ACE_USE_AGA_FEATURES
 	if(s_ubBpp > 5) {
@@ -240,6 +371,7 @@ static void createView(void) {
 		s_pTileBuffer->pCamera->uMaxPos.uwY / 2
 	);
 	tileBufferRedrawAll(s_pTileBuffer);
+	createBobs();
 
 	viewLoad(s_pView);
 	s_ulMoveStart = timerGet();
@@ -247,6 +379,7 @@ static void createView(void) {
 
 static void destroyView(void) {
 	viewLoad(0);
+	destroyBobs();
 	viewDestroy(s_pView);
 	bitmapDestroy(s_pTileset);
 	s_pView = 0;
@@ -418,6 +551,7 @@ void diagTileScrollerLoop(void) {
 	}
 	cameraMoveBy(s_pTileBuffer->pCamera, wDx, wDy);
 	viewProcessManagers(s_pView);
+	processBobs();
 	copProcessBlocks();
 	vPortWaitForEnd(s_pTileVPort);
 }
