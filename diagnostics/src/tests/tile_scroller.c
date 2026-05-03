@@ -1,0 +1,427 @@
+#include "tests/tile_scroller.h"
+#include <ace/managers/blit.h>
+#include <ace/managers/copper.h>
+#include <ace/managers/key.h>
+#include <ace/managers/system.h>
+#include <ace/managers/timer.h>
+#include <ace/managers/viewport/simplebuffer.h>
+#include <ace/managers/viewport/tilebuffer.h>
+#include <ace/utils/bitmap.h>
+#include <stdio.h>
+
+#include "diagnostics.h"
+
+#define TILE_SIZE 16
+#define TILE_SHIFT 4
+#define TILE_COUNT 16
+#define MAP_TILES_X 64
+#define MAP_TILES_Y 64
+#define HUD_HEIGHT 36
+
+typedef enum tMovePattern {
+	MOVE_RIGHT,
+	MOVE_DOWN,
+	MOVE_LEFT,
+	MOVE_UP,
+	MOVE_LEFT_PULSE_UP,
+	MOVE_UP_PULSE_RIGHT,
+	MOVE_RIGHT_PULSE_DOWN,
+	MOVE_DOWN_PULSE_LEFT,
+	MOVE_COUNT
+} tMovePattern;
+
+static tView *s_pView;
+static tVPort *s_pHudVPort;
+static tVPort *s_pTileVPort;
+static tSimpleBufferManager *s_pHudBuffer;
+static tTileBufferManager *s_pTileBuffer;
+static tBitMap *s_pTileset;
+static UBYTE s_ubBpp = 4;
+static UBYTE s_ubFmode = 0;
+static UBYTE s_isBobsEnabled = 0;
+static UBYTE s_isDblBuf = 0;
+static UBYTE s_isManualMove = 0;
+static ULONG s_ulMoveStart;
+
+static UWORD makePaletteColor(UWORD uwIndex, UWORD uwColorCount) {
+	UBYTE ubStep = uwColorCount > 1 ? (15 * uwIndex) / (uwColorCount - 1) : 0;
+	UBYTE ubR = ubStep;
+	UBYTE ubG = (uwIndex * 5) & 0x0F;
+	UBYTE ubB = 15 - ubStep;
+
+	return (ubR << 8) | (ubG << 4) | ubB;
+}
+
+#ifdef ACE_USE_AGA_FEATURES
+static ULONG makePaletteColorAga(UWORD uwIndex, UWORD uwColorCount) {
+	UBYTE ubStep = uwColorCount > 1 ? (255 * uwIndex) / (uwColorCount - 1) : 0;
+	UBYTE ubR = ubStep;
+	UBYTE ubG = (uwIndex * 37) & 0xFF;
+	UBYTE ubB = 255 - ubStep;
+
+	return ((ULONG)ubR << 16) | ((ULONG)ubG << 8) | ubB;
+}
+#endif
+
+static void setupPalette(void) {
+	UWORD uwColorCount = 1 << s_ubBpp;
+
+#ifdef ACE_USE_AGA_FEATURES
+	if(s_ubBpp > 5) {
+		ULONG *pPalette = (ULONG *)s_pHudVPort->pPalette;
+
+		pPalette[0] = 0x000000;
+		for(UWORD i = 1; i < uwColorCount; ++i) {
+			pPalette[i] = makePaletteColorAga(i, uwColorCount);
+		}
+		pPalette[uwColorCount - 1] = 0xFFFFFF;
+		return;
+	}
+#endif
+
+	s_pHudVPort->pPalette[0] = 0x000;
+	for(UWORD i = 1; i < uwColorCount; ++i) {
+		s_pHudVPort->pPalette[i] = makePaletteColor(i, uwColorCount);
+	}
+	s_pHudVPort->pPalette[uwColorCount - 1] = 0xFFF;
+}
+
+static UWORD getTextWidth(const char *szText) {
+	UWORD uwWidth = 0;
+	const tFont *pFont = diagnosticsGetFont();
+
+	while(*szText) {
+		uwWidth += fontGlyphWidth(pFont, *szText);
+		++szText;
+	}
+	return uwWidth;
+}
+
+static void drawHeaderLine(UWORD uwY, const char *szText, UBYTE ubTextColor) {
+	UWORD uwTextWidth = getTextWidth(szText);
+	UWORD uwBackWidth = uwTextWidth + 8;
+	UWORD uwMaxWidth = s_pHudBuffer->uBfrBounds.uwX - 4;
+
+	if(uwBackWidth > uwMaxWidth) {
+		uwBackWidth = uwMaxWidth;
+	}
+	blitRect(s_pHudBuffer->pBack, 2, uwY - 1, uwBackWidth, 9, 0);
+	fontDrawStr(
+		diagnosticsGetFont(), s_pHudBuffer->pBack, 4, uwY,
+		szText, ubTextColor, FONT_LEFT | FONT_TOP, diagnosticsGetTextBitMap()
+	);
+}
+
+static void drawHeader(void) {
+	char szLine[96];
+	UBYTE ubTextColor = (1 << s_ubBpp) - 1;
+
+	blitRect(
+		s_pHudBuffer->pBack, 0, 0,
+		s_pHudBuffer->uBfrBounds.uwX, s_pHudBuffer->uBfrBounds.uwY, 1
+	);
+	sprintf(
+		szLine, "TILEBUFFER %s BPP %u FMODE %u BOBS %s DBLBUF %s",
+		s_isManualMove ? "MANUAL" : "AUTO",
+		s_ubBpp, s_ubFmode,
+		s_isBobsEnabled ? "ON" : "OFF",
+		s_isDblBuf ? "ON" : "OFF"
+	);
+	drawHeaderLine(4, szLine, ubTextColor);
+	drawHeaderLine(14, "SPACE auto/manual  WSAD manual  ESC menu", ubTextColor);
+	drawHeaderLine(24, "2-8 bpp  F fmode  B bobs  D dblbuf in auto", ubTextColor);
+}
+
+static void drawTile(UWORD uwTile, UBYTE ubBaseColor) {
+	UWORD uwY = uwTile * TILE_SIZE;
+	UBYTE ubMaxColor = (1 << s_ubBpp) - 1;
+	UBYTE ubColorA = 1 + (ubBaseColor % ubMaxColor);
+	UBYTE ubColorB = 1 + ((ubBaseColor + 3) % ubMaxColor);
+	UBYTE ubColorC = 1 + ((ubBaseColor + 7) % ubMaxColor);
+
+	blitRect(s_pTileset, 0, uwY, TILE_SIZE, TILE_SIZE, ubColorA);
+	blitRect(s_pTileset, 0, uwY, TILE_SIZE, 1, ubColorC);
+	blitRect(s_pTileset, 0, uwY + TILE_SIZE - 1, TILE_SIZE, 1, ubColorC);
+	blitRect(s_pTileset, 0, uwY, 1, TILE_SIZE, ubColorC);
+	blitRect(s_pTileset, TILE_SIZE - 1, uwY, 1, TILE_SIZE, ubColorC);
+
+	if(uwTile & 1) {
+		blitLine(s_pTileset, 2, uwY + 2, 13, uwY + 13, ubColorB, 0xFFFF, 0);
+		blitLine(s_pTileset, 13, uwY + 2, 2, uwY + 13, ubColorB, 0xFFFF, 0);
+	}
+	else {
+		blitRect(s_pTileset, 4, uwY + 4, 8, 8, ubColorB);
+	}
+}
+
+static void createTileset(void) {
+	s_pTileset = bitmapCreate(
+		TILE_SIZE, TILE_SIZE * TILE_COUNT, s_ubBpp,
+		BMF_CLEAR | BMF_INTERLEAVED
+	);
+
+	for(UWORD i = 0; i < TILE_COUNT; ++i) {
+		drawTile(i, i + 1);
+	}
+}
+
+static void fillTileMap(void) {
+	for(UWORD x = 0; x < MAP_TILES_X; ++x) {
+		for(UWORD y = 0; y < MAP_TILES_Y; ++y) {
+			s_pTileBuffer->pTileData[x][y] = (x + y * 3 + ((x ^ y) & 3)) % TILE_COUNT;
+		}
+	}
+}
+
+static void createView(void) {
+#ifdef ACE_USE_AGA_FEATURES
+	if(s_ubBpp > 5) {
+		s_pView = viewCreate(0,
+			TAG_VIEW_GLOBAL_PALETTE, 1,
+			TAG_VIEW_GLOBAL_BPP, 1,
+			TAG_VIEW_USES_AGA, 1,
+		TAG_END);
+		s_pHudVPort = vPortCreate(0,
+			TAG_VPORT_VIEW, s_pView,
+			TAG_VPORT_HEIGHT, HUD_HEIGHT,
+			TAG_VPORT_BPP, s_ubBpp,
+			TAG_VPORT_USES_AGA, 1,
+			TAG_VPORT_FMODE, s_ubFmode,
+		TAG_END);
+		s_pTileVPort = vPortCreate(0,
+			TAG_VPORT_VIEW, s_pView,
+			TAG_VPORT_BPP, s_ubBpp,
+			TAG_VPORT_USES_AGA, 1,
+			TAG_VPORT_FMODE, s_ubFmode,
+		TAG_END);
+	}
+	else
+#endif
+	{
+		s_pView = viewCreate(0,
+			TAG_VIEW_GLOBAL_PALETTE, 1,
+			TAG_VIEW_GLOBAL_BPP, 1,
+		TAG_END);
+		s_pHudVPort = vPortCreate(0,
+			TAG_VPORT_VIEW, s_pView,
+			TAG_VPORT_HEIGHT, HUD_HEIGHT,
+			TAG_VPORT_BPP, s_ubBpp,
+		TAG_END);
+		s_pTileVPort = vPortCreate(0,
+			TAG_VPORT_VIEW, s_pView,
+			TAG_VPORT_BPP, s_ubBpp,
+		TAG_END);
+	}
+
+	s_pHudBuffer = simpleBufferCreate(0,
+		TAG_SIMPLEBUFFER_VPORT, s_pHudVPort,
+		TAG_SIMPLEBUFFER_BITMAP_FLAGS, BMF_CLEAR | BMF_INTERLEAVED,
+	TAG_END);
+
+	createTileset();
+	s_pTileBuffer = tileBufferCreate(0,
+		TAG_TILEBUFFER_VPORT, s_pTileVPort,
+		TAG_TILEBUFFER_BITMAP_FLAGS, BMF_CLEAR | BMF_INTERLEAVED,
+		TAG_TILEBUFFER_BOUND_TILE_X, MAP_TILES_X,
+		TAG_TILEBUFFER_BOUND_TILE_Y, MAP_TILES_Y,
+		TAG_TILEBUFFER_TILE_SHIFT, TILE_SHIFT,
+		TAG_TILEBUFFER_TILESET, s_pTileset,
+		TAG_TILEBUFFER_IS_DBLBUF, s_isDblBuf,
+		TAG_TILEBUFFER_REDRAW_QUEUE_LENGTH, 32,
+		TAG_TILEBUFFER_MAX_TILESET_SIZE, TILE_COUNT,
+	TAG_END);
+
+	setupPalette();
+	drawHeader();
+	fillTileMap();
+	cameraSetCoord(
+		s_pTileBuffer->pCamera,
+		s_pTileBuffer->pCamera->uMaxPos.uwX / 2,
+		s_pTileBuffer->pCamera->uMaxPos.uwY / 2
+	);
+	tileBufferRedrawAll(s_pTileBuffer);
+
+	viewLoad(s_pView);
+	s_ulMoveStart = timerGet();
+}
+
+static void destroyView(void) {
+	viewLoad(0);
+	viewDestroy(s_pView);
+	bitmapDestroy(s_pTileset);
+	s_pView = 0;
+	s_pHudVPort = 0;
+	s_pTileVPort = 0;
+	s_pHudBuffer = 0;
+	s_pTileBuffer = 0;
+	s_pTileset = 0;
+}
+
+static void recreateView(void) {
+	destroyView();
+	createView();
+}
+
+static UBYTE getMaxBpp(void) {
+#ifdef ACE_USE_AGA_FEATURES
+	return 8;
+#else
+	return 5;
+#endif
+}
+
+static void setBpp(UBYTE ubBpp) {
+	if(ubBpp < 2 || ubBpp > getMaxBpp() || ubBpp == s_ubBpp) {
+		return;
+	}
+	s_ubBpp = ubBpp;
+#ifndef ACE_USE_AGA_FEATURES
+	s_ubFmode = 0;
+#endif
+	recreateView();
+}
+
+static void handleConfigKeys(void) {
+	if(keyUse(KEY_2)) {
+		setBpp(2);
+	}
+	else if(keyUse(KEY_3)) {
+		setBpp(3);
+	}
+	else if(keyUse(KEY_4)) {
+		setBpp(4);
+	}
+	else if(keyUse(KEY_5)) {
+		setBpp(5);
+	}
+#ifdef ACE_USE_AGA_FEATURES
+	else if(keyUse(KEY_6)) {
+		setBpp(6);
+	}
+	else if(keyUse(KEY_7)) {
+		setBpp(7);
+	}
+	else if(keyUse(KEY_8)) {
+		setBpp(8);
+	}
+#endif
+
+	if(keyUse(KEY_F)) {
+#ifdef ACE_USE_AGA_FEATURES
+		s_ubFmode = (s_ubFmode + 1) & 3;
+		recreateView();
+#endif
+	}
+	if(!s_isManualMove && keyUse(KEY_D)) {
+		s_isDblBuf = !s_isDblBuf;
+		recreateView();
+	}
+	if(keyUse(KEY_B)) {
+		s_isBobsEnabled = !s_isBobsEnabled;
+		drawHeader();
+	}
+	if(keyUse(KEY_SPACE)) {
+		s_isManualMove = !s_isManualMove;
+		s_ulMoveStart = timerGet();
+		drawHeader();
+	}
+}
+
+static void getAutoMove(WORD *pDx, WORD *pDy) {
+	ULONG ulElapsed = timerGetDelta(s_ulMoveStart, timerGet());
+	ULONG ulFreq = systemGetVerticalBlankFrequency();
+	ULONG ulStep = (ulElapsed / (ulFreq * 2)) % MOVE_COUNT;
+	ULONG ulPulseDiv = ulFreq / 10;
+	UBYTE isPulseOn;
+
+	if(!ulPulseDiv) {
+		ulPulseDiv = 1;
+	}
+	isPulseOn = ((ulElapsed / ulPulseDiv) & 1) == 0;
+	*pDx = 0;
+	*pDy = 0;
+
+	switch((tMovePattern)ulStep) {
+		case MOVE_RIGHT:
+			*pDx = 2;
+			break;
+		case MOVE_DOWN:
+			*pDy = 2;
+			break;
+		case MOVE_LEFT:
+			*pDx = -2;
+			break;
+		case MOVE_UP:
+			*pDy = -2;
+			break;
+		case MOVE_LEFT_PULSE_UP:
+			*pDx = -2;
+			*pDy = isPulseOn ? -2 : 0;
+			break;
+		case MOVE_UP_PULSE_RIGHT:
+			*pDy = -2;
+			*pDx = isPulseOn ? 2 : 0;
+			break;
+		case MOVE_RIGHT_PULSE_DOWN:
+			*pDx = 2;
+			*pDy = isPulseOn ? 2 : 0;
+			break;
+		case MOVE_DOWN_PULSE_LEFT:
+			*pDy = 2;
+			*pDx = isPulseOn ? -2 : 0;
+			break;
+		default:
+			break;
+	}
+}
+
+static void getManualMove(WORD *pDx, WORD *pDy) {
+	*pDx = 0;
+	*pDy = 0;
+
+	if(keyCheck(KEY_A)) {
+		*pDx = -2;
+	}
+	else if(keyCheck(KEY_D)) {
+		*pDx = 2;
+	}
+	if(keyCheck(KEY_W)) {
+		*pDy = -2;
+	}
+	else if(keyCheck(KEY_S)) {
+		*pDy = 2;
+	}
+}
+
+void diagTileScrollerCreate(void) {
+	if(s_ubBpp > getMaxBpp()) {
+		s_ubBpp = getMaxBpp();
+	}
+	createView();
+}
+
+void diagTileScrollerLoop(void) {
+	WORD wDx;
+	WORD wDy;
+
+	if(keyUse(KEY_ESCAPE)) {
+		diagnosticsShowMenu();
+		return;
+	}
+
+	handleConfigKeys();
+	if(s_isManualMove) {
+		getManualMove(&wDx, &wDy);
+	}
+	else {
+		getAutoMove(&wDx, &wDy);
+	}
+	cameraMoveBy(s_pTileBuffer->pCamera, wDx, wDy);
+	viewProcessManagers(s_pView);
+	copProcessBlocks();
+	vPortWaitForEnd(s_pTileVPort);
+}
+
+void diagTileScrollerDestroy(void) {
+	destroyView();
+}

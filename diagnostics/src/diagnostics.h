@@ -14,6 +14,9 @@ void diagnosticsStart(void);
 void diagnosticsChangeTo(UBYTE ubTestIndex);
 void diagnosticsNextTest(void);
 void diagnosticsPrevTest(void);
+void diagnosticsShowMenu(void);
+void diagnosticsShowSimpleBuffer(void);
+void diagnosticsShowTileScroller(void);
 
 UBYTE diagnosticsGetCurrentBpp(void);
 UBYTE diagnosticsGetCurrentFmode(void);

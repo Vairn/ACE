@@ -130,7 +130,7 @@ static void drawHeader(UBYTE ubBpp) {
 
 	sprintf(szTitle, "DIAG: %s", diagnosticsGetCurrentName());
 	drawHeaderLine(4, szTitle, ubTextColor);
-	drawHeaderLine(13, "SPACE next  BACKSPACE prev  ESC quit", ubTextColor);
+	drawHeaderLine(13, "SPACE next  BACKSPACE prev  ESC menu", ubTextColor);
 
 #ifdef ACE_USE_AGA_FEATURES
 	if(diagnosticsIsCurrentAga()) {
@@ -195,7 +195,7 @@ void diagSimpleBufferBppLoop(void) {
 	}
 
 	if(keyUse(KEY_ESCAPE)) {
-		gameExit();
+		diagnosticsShowMenu();
 		return;
 	}
 	if(keyUse(KEY_SPACE)) {
