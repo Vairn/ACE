@@ -161,8 +161,8 @@ static void drawHeader(void) {
 		s_isDblBuf ? "ON" : "OFF"
 	);
 	drawHeaderLine(4, szLine, ubTextColor);
-	drawHeaderLine(14, "SPACE auto/manual  WSAD manual  ESC menu", ubTextColor);
-	drawHeaderLine(24, "2-8 bpp  F fmode  B bobs  D dblbuf in auto", ubTextColor);
+	drawHeaderLine(14, "SPACE scroll auto/manual  WSAD move  ESC menu", ubTextColor);
+	drawHeaderLine(24, "2-8 bpp  F fmode  B bobs  D dblbuf", ubTextColor);
 }
 
 static void drawTile(UWORD uwTile, UBYTE ubBaseColor) {
