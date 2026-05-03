@@ -18,9 +18,10 @@ include_directories(${PROJECT_SOURCE_DIR}/src)
 
 set(RES_DIR ${CMAKE_CURRENT_LIST_DIR}/res)
 set(DATA_DIR ${CMAKE_CURRENT_BINARY_DIR}/data)
+set(ACE_ROOT ${CMAKE_CURRENT_LIST_DIR}/..)
 
-add_subdirectory(.. ace)
-include_directories(../include)
+add_subdirectory(${ACE_ROOT} ace)
+include_directories(${ACE_ROOT}/include)
 
 set(TARGET_NAME ${PROJECT_NAME_LOWER})
 

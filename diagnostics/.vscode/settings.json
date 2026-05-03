@@ -2,5 +2,5 @@
     "[m68k]": {
         "editor.rulers": []
     },
-    "amiga.program": "diagnostics/build/diagnostics"
+    "amiga.program": "build-ocs/diagnostics"
 }

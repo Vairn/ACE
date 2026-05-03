@@ -1,7 +1,5 @@
 .idea/
-**/.vscode/*
-!.vscode/
-!.vscode/*.json
+# **/.vscode/*
 ace\.code-workspace
 
 build*/

@@ -6,7 +6,7 @@
             "type": "shell",
             "command": "make",
             "options": {
-                "cwd": "${workspaceFolder}/diagnostics",
+                "cwd": "${workspaceFolder}",
                 "env": {
                     "PATH": "${env:PATH}:${command:amiga.bin-path}/opt/bin:${command:amiga.bin-path}"
                 }
@@ -36,7 +36,7 @@
             "type": "shell",
             "command": "make",
             "options": {
-                "cwd": "${workspaceFolder}/diagnostics",
+                "cwd": "${workspaceFolder}",
                 "env": {
                     "PATH": "${env:PATH}:${command:amiga.bin-path}/opt/bin:${command:amiga.bin-path}"
                 }
@@ -63,7 +63,7 @@
             "type": "shell",
             "command": "make",
             "options": {
-                "cwd": "${workspaceFolder}/diagnostics"
+                "cwd": "${workspaceFolder}"
             },
             "args": ["clean"],
             "problemMatcher": []
