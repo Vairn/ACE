@@ -11,6 +11,7 @@
 #include <ace/utils/chunky.h>
 #include <ace/utils/custom.h>
 #include <ace/utils/disk_file.h>
+#include <string.h>
 
 /* Globals */
 
@@ -19,7 +20,7 @@
 tBitMap *bitmapCreate(
 	UWORD uwWidth, UWORD uwHeight, UBYTE ubDepth, UBYTE ubFlags
 ) {
-#ifdef AMIGA
+#if defined(AMIGA) || defined(ACE_SDL)
 	tBitMap *pBitMap;
 	UBYTE i;
 
@@ -56,7 +57,7 @@ tBitMap *bitmapCreate(
 		uwRealWidth = pBitMap->BytesPerRow;
 		pBitMap->BytesPerRow *= ubDepth;
 
-		pBitMap->Planes[0] = (PLANEPTR) memAlloc(
+		pBitMap->Planes[0] = (UBYTE *) memAlloc(
 			pBitMap->BytesPerRow*uwHeight,
 			(ubFlags & BMF_FASTMEM) ? MEMF_ANY : MEMF_CHIP
 		);
@@ -75,7 +76,7 @@ tBitMap *bitmapCreate(
 	else if(ubFlags & BMF_CONTIGUOUS) {
 		pBitMap->Flags |= BMF_CONTIGUOUS;
 		ULONG ulPlaneSize = pBitMap->BytesPerRow * uwHeight;
-		pBitMap->Planes[0] = (PLANEPTR) memAllocChip(ulPlaneSize * ubDepth);
+		pBitMap->Planes[0] = (UBYTE *) memAllocChip(ulPlaneSize * ubDepth);
 		if(!pBitMap->Planes[0]) {
 				logWrite("ERR: Can't alloc contiguous bitplanes\n");
 				goto fail;
@@ -89,7 +90,7 @@ tBitMap *bitmapCreate(
 	}
 	else {
 		for(i = ubDepth; i--;) {
-			pBitMap->Planes[i] = (PLANEPTR) memAllocChip(pBitMap->BytesPerRow * uwHeight);
+			pBitMap->Planes[i] = (UBYTE *) memAllocChip(pBitMap->BytesPerRow * uwHeight);
 			if(!pBitMap->Planes[i]) {
 				logWrite("ERR: Can't alloc bitplane %hu/%hu\n", ubDepth - i + 1,ubDepth);
 				while(++i != ubDepth) {
@@ -117,7 +118,7 @@ fail:
 
 #else
 	return 0;
-#endif // AMIGA
+#endif /* AMIGA || ACE_SDL */
 }
 
 void bitmapLoadFromPath(tBitMap *pBitMap, const char *szPath, UWORD uwStartX, UWORD uwStartY) {

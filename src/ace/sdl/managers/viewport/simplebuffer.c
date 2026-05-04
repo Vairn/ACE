@@ -47,7 +47,7 @@ tSimpleBufferManager *simpleBufferCreate(void *pTags,	...) {
 	);
 	logWrite("Bounds: %ux%u\n", uwBoundWidth, uwBoundHeight);
 	pFront = bitmapCreate(
-		uwBoundWidth, uwBoundHeight, pVPort->ubBPP, ubBitmapFlags
+		uwBoundWidth, uwBoundHeight, pVPort->ubBpp, ubBitmapFlags
 	);
 	if(!pFront) {
 		logWrite("ERR: Can't alloc buffer bitmap!\n");
@@ -57,7 +57,7 @@ tSimpleBufferManager *simpleBufferCreate(void *pTags,	...) {
 	UBYTE isDblBfr = tagGet(pTags, vaTags, TAG_SIMPLEBUFFER_IS_DBLBUF, 0);
 	if(isDblBfr) {
 		pBack = bitmapCreate(
-			uwBoundWidth, uwBoundHeight, pVPort->ubBPP, ubBitmapFlags
+			uwBoundWidth, uwBoundHeight, pVPort->ubBpp, ubBitmapFlags
 		);
 		if(!pBack) {
 			logWrite("ERR: Can't alloc buffer bitmap!\n");

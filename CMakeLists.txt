@@ -28,6 +28,15 @@ set(VER_FULL "${VER_X}.${VER_Y}.${VER_Z}")
 
 if(AMIGA)
 	file(GLOB_RECURSE ACE_SOURCES src/ace/amiga/*.c src/ace/common/*.c)
+	# common/managers mirrors several amiga/managers files; compiling both
+	# duplicates symbols (e.g. blit wrappers, simpleBufferIsRectVisible, bartmanLog).
+	foreach(_aceDup IN ITEMS
+		"${PROJECT_SOURCE_DIR}/src/ace/common/managers/blit.c"
+		"${PROJECT_SOURCE_DIR}/src/ace/common/managers/viewport/simplebuffer.c"
+	)
+		list(REMOVE_ITEM ACE_SOURCES "${_aceDup}")
+	endforeach()
+	list(REMOVE_ITEM ACE_SOURCES "${PROJECT_SOURCE_DIR}/src/ace/amiga/managers/log.c")
 else()
 	# Assume SDL - what else can it be?
 	set(ACE_SDL ON)
@@ -79,6 +88,10 @@ if(AMIGA)
 	if(ACE_USE_ECS_FEATURES)
 		target_compile_definitions(${TARGET_NAME} PUBLIC ACE_USE_ECS_FEATURES)
 	endif()
+else()
+	if(ACE_USE_ECS_FEATURES)
+		target_compile_definitions(${TARGET_NAME} PUBLIC ACE_USE_ECS_FEATURES)
+	endif()
 endif()
 target_compile_definitions(${TARGET_NAME} PUBLIC ACE_TILEBUFFER_TILE_TYPE=${ACE_TILEBUFFER_TILE_TYPE})
 if(ACE_SCROLLBUFFER_POT_BITMAP_HEIGHT)
@@ -96,6 +109,10 @@ target_compile_definitions(${TARGET_NAME} PUBLIC ACE_SCROLLBUFFER_Y_MARGIN_SIZE=
 if(AMIGA)
 	if(ACE_USE_AGA_FEATURES)
 		target_compile_definitions(${TARGET_NAME} PUBLIC ACE_USE_ECS_FEATURES ACE_USE_AGA_FEATURES)
+	endif()
+else()
+	if(ACE_USE_AGA_FEATURES)
+		target_compile_definitions(${TARGET_NAME} PUBLIC ACE_USE_AGA_FEATURES)
 	endif()
 endif()
 
@@ -138,20 +155,35 @@ if(AMIGA)
 endif()
 
 if(ACE_SDL)
-	include(cmake/CPM.cmake)
+	option(ACE_USE_SYSTEM_SDL2 "Use find_package(SDL2) instead of CPM" OFF)
+	if(ACE_USE_SYSTEM_SDL2)
+		find_package(SDL2 CONFIG REQUIRED)
+		if(TARGET SDL2::SDL2-static)
+			target_link_libraries(${TARGET_NAME} SDL2::SDL2-static)
+			if(NOT TARGET SDL2::SDL2)
+				add_library(SDL2::SDL2 ALIAS SDL2-static)
+			endif()
+		elseif(TARGET SDL2::SDL2)
+			target_link_libraries(${TARGET_NAME} SDL2::SDL2)
+		else()
+			message(FATAL_ERROR "ACE_USE_SYSTEM_SDL2: SDL2 CMake package has no SDL2::SDL2 or SDL2::SDL2-static")
+		endif()
+	else()
+		include(cmake/CPM.cmake)
 
-	set(SDL_DIRECTX OFF)
-	set(SDL2_NO_MWINDOWS ON)
-	CPMAddPackage(
-		NAME SDL2
-		VERSION 2.28.5
-		URL https://libsdl.org/release/SDL2-2.28.5.zip
-	)
-	if(SDL2_ADDED)
-		add_library(SDL2::SDL2 ALIAS SDL2)
+		set(SDL_DIRECTX OFF)
+		set(SDL2_NO_MWINDOWS ON)
+		CPMAddPackage(
+			NAME SDL2
+			VERSION 2.28.5
+			URL https://libsdl.org/release/SDL2-2.28.5.zip
+		)
+		if(SDL2_ADDED)
+			add_library(SDL2::SDL2 ALIAS SDL2)
+		endif()
+
+		target_link_libraries(${TARGET_NAME} SDL2-static)
 	endif()
-
-	target_link_libraries(${TARGET_NAME} SDL2-static)
 endif()
 
 target_include_directories(${TARGET_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/include)

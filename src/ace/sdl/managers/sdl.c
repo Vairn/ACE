@@ -31,17 +31,43 @@ static void sdlUpdateSurfaceContents(void) {
 
 	if(s_pCurrentView && s_pCurrentView->ubVpCount > 0) {
 		tVPort *pVp = s_pCurrentView->pFirstVPort;
-		SDL_Color pColors[32];
-		for(UBYTE i = 0; i < 32; ++i) {
-			pColors[i] = (SDL_Color){
-				.r = (pVp->pPalette[i] >> 8) * 17,
-				.g = ((pVp->pPalette[i] >> 4) & 0xF) * 17,
-				.b = ((pVp->pPalette[i] >> 0) & 0xF) * 17,
-				.a = 255
-			};
+		SDL_Color pColors[256];
+		UWORD uwPalCount = 32;
+#ifdef ACE_USE_AGA_FEATURES
+		if(pVp->eFlags & VP_FLAG_AGA) {
+			ULONG ulN = 1u << pVp->ubBpp;
+			if(ulN > 256) {
+				ulN = 256;
+			}
+			uwPalCount = (UWORD)ulN;
+			for(UWORD i = 0; i < uwPalCount; ++i) {
+				ULONG ul = pVp->uPalette.pAga[i];
+				pColors[i] = (SDL_Color){
+					.r = (Uint8)((ul >> 16) & 0xFF),
+					.g = (Uint8)((ul >> 8) & 0xFF),
+					.b = (Uint8)(ul & 0xFF),
+					.a = 255
+				};
+			}
+		}
+		else
+#endif
+		{
+			for(UBYTE i = 0; i < 32; ++i) {
+				UWORD uw = pVp->uPalette.pOCS[i];
+				pColors[i] = (SDL_Color){
+					.r = (uw >> 8) * 17,
+					.g = ((uw >> 4) & 0xF) * 17,
+					.b = ((uw >> 0) & 0xF) * 17,
+					.a = 255
+				};
+			}
+			uwPalCount = 32;
 		}
 
-		SDL_SetPaletteColors(s_pOffscreenSurface->format->palette, pColors, 0, 32);
+		SDL_SetPaletteColors(
+			s_pOffscreenSurface->format->palette, pColors, 0, uwPalCount
+		);
 		// Update palette from first VPort
 		while(pVp) {
 			// Copy contents of each vport to SDL surface
@@ -201,6 +227,10 @@ tView *sdlGetCurrentView(void) {
 
 tBitMap *sdlGetSurfaceBitmap(void) {
 	return s_pRenderBitmap;
+}
+
+struct SDL_Window *sdlGetWindow(void) {
+	return s_pWindow;
 }
 
 ULONG sdlGetMillisSinceVblank(void) {

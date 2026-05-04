@@ -1,4 +1,5 @@
 #include <ace/managers/audio.h>
+#include <ace/utils/file.h>
 #include <ace/managers/memory.h>
 #include <ace/managers/log.h>
 #include <ace/utils/custom.h>
@@ -87,7 +88,7 @@ tSample *sampleCreateFromFile(const char *szPath, UWORD uwSampleRateHz) {
 		"sampleCreateFromFile(szPath: '%s', uwSampleRateHz: %hu)",
 		szPath, uwSampleRateHz
 	);
-	LONG lLength = fileGetSize(szPath);
+	LONG lLength = fileGetPathSize(szPath);
 	if(lLength <= 0) {
 		logWrite("ERR: File doesn't exist!\n");
 		logBlockEnd("sampleCreateFromFile()");

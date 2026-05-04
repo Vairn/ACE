@@ -5,6 +5,7 @@
 #include <ace/managers/system.h>
 #include <stdlib.h>
 #include <clib/graphics_protos.h>
+#include <graphics/gfxbase.h>
 #include <clib/dos_protos.h>
 #include <hardware/intbits.h>
 #include <hardware/dmabits.h>
@@ -1067,6 +1068,10 @@ void systemDestroy(void) {
 		ReplyMsg(s_pReturnMsg);
 	}
 #endif
+}
+
+void systemProcessFinal(void) {
+	/* Per-frame hook after genericProcess(); SDL pumps events here. */
 }
 
 void systemUnuse(void) {

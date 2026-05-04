@@ -4,6 +4,7 @@
 
 #include <ace/managers/log.h>
 #include <string.h>
+#include <stdio.h>
 #include <ace/macros.h>
 #include <ace/managers/system.h>
 #include <ace/utils/disk_file.h>
@@ -92,6 +93,10 @@ void _logWriteVa(char *szFormat, va_list vaArgs) {
 	g_sLogManager.wasLastInline = szFormat[strlen(szFormat) - 1] != '\n';
 
 	vsprintf(&s_szMsg[uwOffs], szFormat, vaArgs);
+#ifdef ACE_SDL
+	fputs(s_szMsg, stderr);
+	fflush(stderr);
+#endif
 	uaeWrite(s_szMsg);
 	if(isWritingToFileAllowed()) {
 		systemUse();

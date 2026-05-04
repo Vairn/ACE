@@ -4,11 +4,32 @@
 
 #include <ace/utils/file.h>
 #include <ace/utils/endian.h>
-#include <stdarg.h>
+#include <ace/utils/disk_file.h>
+#include <ace/utils/disk_file_private.h>
+#include <ace/managers/memory.h>
 #include <ace/managers/system.h>
 #include <ace/managers/log.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
 
 //------------------------------------------------------------------ PRIVATE FNS
+
+static ULONG fileReadRaw(tFile *pFile, void *pDest, ULONG ulByteCount) {
+#if defined(ACE_FILE_USE_ONLY_DISK)
+	return diskFileRead(pFile, pDest, ulByteCount);
+#else
+	return pFile->pCallbacks->cbFileRead(pFile->pData, pDest, ulByteCount);
+#endif
+}
+
+static ULONG fileWriteRaw(tFile *pFile, const void *pSrc, ULONG ulByteCount) {
+#if defined(ACE_FILE_USE_ONLY_DISK)
+	return diskFileWrite(pFile, pSrc, ulByteCount);
+#else
+	return pFile->pCallbacks->cbFileWrite(pFile->pData, pSrc, ulByteCount);
+#endif
+}
 
 static ULONG fileReadData(tFile *pFile, void *pDest, UBYTE ubDataSize, ULONG ulCount) {
 #ifdef ACE_DEBUG
@@ -18,28 +39,26 @@ static ULONG fileReadData(tFile *pFile, void *pDest, UBYTE ubDataSize, ULONG ulC
 #endif
 	systemUse();
 	systemReleaseBlitterToOs();
-#if defined(AMIGA)
-	// Optimize for mini-std
-	fread(pDest, ubDataSize * ulCount, 1, pFile);
-	ULONG ulReadCount = ulCount;
-#elif defined(ENDIAN_NATIVE_LITTLE)
-	ULONG ulReadCount = fread(pDest, ubDataSize, ulCount, pFile);
+	ULONG ulBytes = ubDataSize * ulCount;
+	ULONG ulGot = fileReadRaw(pFile, pDest, ulBytes);
+	ULONG ulReadCount = (ubDataSize && ulGot >= ubDataSize) ? (ulGot / ubDataSize) : 0;
+#if defined(ENDIAN_NATIVE_LITTLE)
 	if(ubDataSize == sizeof(UBYTE)) {
 		// no endian swap for bytes
 	}
-	else if(ubDataSize == sizeof(UWORD)) {
+	else if(ubDataSize == sizeof(UWORD) && ulReadCount) {
 		UWORD *pWords = pDest;
-		for(ULONG i = 0; i < ulCount; ++i) {
+		for(ULONG i = 0; i < ulReadCount; ++i) {
 			pWords[i] = endianBigToNative16(pWords[i]);
 		}
 	}
-	else if(ubDataSize == sizeof(ULONG)) {
-		UWORD *pLongs = pDest;
-		for(ULONG i = 0; i < ulCount; ++i) {
+	else if(ubDataSize == sizeof(ULONG) && ulReadCount) {
+		ULONG *pLongs = pDest;
+		for(ULONG i = 0; i < ulReadCount; ++i) {
 			pLongs[i] = endianBigToNative32(pLongs[i]);
 		}
 	}
-	else {
+	else if(ulReadCount) {
 		logWrite("ERR: Unsupported data size: %hhu\n", ubDataSize);
 	}
 #endif
@@ -60,28 +79,27 @@ static ULONG fileWriteData(tFile *pFile, const void *pSource, UBYTE ubDataSize, 
 	ULONG ulWriteCount = 0;
 #if defined(ENDIAN_NATIVE_LITTLE)
 	if(ubDataSize == sizeof(UBYTE)) {
-		// no endian swap for bytes
-		ulWriteCount = fwrite(pSource, ubDataSize, ulCount, pFile);
+		ulWriteCount = fileWriteRaw(pFile, pSource, ubDataSize * ulCount);
 	}
 	else if(ubDataSize == sizeof(UWORD)) {
 		const UWORD *pWords = pSource;
 		for(ULONG i = 0; i < ulCount; ++i) {
 			UWORD uwReversed = endianBigToNative16(pWords[i]);
-			ulWriteCount += fwrite(&uwReversed, ubDataSize, 1, pFile);
+			ulWriteCount += fileWriteRaw(pFile, &uwReversed, ubDataSize);
 		}
 	}
 	else if(ubDataSize == sizeof(ULONG)) {
-		const UWORD *pLongs = pSource;
+		const ULONG *pLongs = pSource;
 		for(ULONG i = 0; i < ulCount; ++i) {
 			ULONG ulReversed = endianBigToNative32(pLongs[i]);
-			ulWriteCount += fwrite(&ulReversed, ubDataSize, 1, pFile);
+			ulWriteCount += fileWriteRaw(pFile, &ulReversed, ubDataSize);
 		}
 	}
 	else {
 		logWrite("ERR: Unsupported data size: %hhu\n", ubDataSize);
 	}
 #else
-	ulWriteCount = fwrite(pSource, ubDataSize, ulCount, pFile);
+	ulWriteCount = fileWriteRaw(pFile, pSource, ubDataSize * ulCount);
 #endif
 	systemGetBlitterFromOs();
 	systemUnuse();
@@ -91,90 +109,100 @@ static ULONG fileWriteData(tFile *pFile, const void *pSource, UBYTE ubDataSize, 
 
 //------------------------------------------------------------------- PUBLIC FNS
 
-LONG fileGetSize(const char *szPath) {
-	// One could use std library to seek to end of file and use ftell,
-	// but SEEK_END is not guaranteed to work.
-	// http://www.cplusplus.com/reference/cstdio/fseek/
-	// On the other hand, Lock/UnLock is bugged on KS1.3 and doesn't allow
-	// for doing Open() on same file after using it.
-	// So I ultimately do it using fseek.
-
+LONG fileGetPathSize(const char *szPath) {
 	systemUse();
 	systemReleaseBlitterToOs();
-	logBlockBegin("fileGetSize(szPath: '%s')", szPath);
-	FILE *pFile = fopen(szPath, "rb");
-	if(!pFile) {
+	logBlockBegin("fileGetPathSize(szPath: '%s')", szPath);
+	FILE *pFsFile = fopen(szPath, "rb");
+	if(!pFsFile) {
 		logWrite("ERR: File doesn't exist");
-		logBlockEnd("fileGetSize()");
+		logBlockEnd("fileGetPathSize()");
 		systemGetBlitterFromOs();
 		systemUnuse();
 		return -1;
 	}
-	fseek(pFile, 0, SEEK_END);
-	LONG lSize = ftell(pFile);
-	fclose(pFile);
+	fseek(pFsFile, 0, SEEK_END);
+	LONG lSize = ftell(pFsFile);
+	fclose(pFsFile);
 
-	logBlockEnd("fileGetSize()");
+	logBlockEnd("fileGetPathSize()");
 	systemGetBlitterFromOs();
 	systemUnuse();
 
 	return lSize;
 }
 
-tFile *fileOpen(const char *szPath, const char *szMode) {
-	// TODO check if disk is read protected when szMode has 'a'/'r'/'x'
-	systemUse();
-	systemReleaseBlitterToOs();
-	FILE *pFile = fopen(szPath, szMode);
-	systemGetBlitterFromOs();
-	systemUnuse();
+LONG fileGetSize(tFile *pFile) {
+#if defined(ACE_FILE_USE_ONLY_DISK)
+	return (LONG)diskFileGetSize(pFile);
+#else
+	return (LONG)pFile->pCallbacks->cbFileGetSize(pFile->pData);
+#endif
+}
 
-	return pFile;
+tFile *fileOpen(const char *szPath, const char *szMode) {
+	UBYTE isRead = 1;
+	if(szMode && (szMode[0] == 'w' || szMode[0] == 'W' || szMode[0] == 'a' || szMode[0] == 'A')) {
+		isRead = 0;
+	}
+	return diskFileOpen(
+		szPath, isRead ? DISK_FILE_MODE_READ : DISK_FILE_MODE_WRITE, 0
+	);
 }
 
 void fileClose(tFile *pFile) {
+#if defined(ACE_FILE_USE_ONLY_DISK)
+	diskFileClose(pFile);
+#else
 	systemUse();
 	systemReleaseBlitterToOs();
-	fclose(pFile);
+	pFile->pCallbacks->cbFileClose(pFile->pData);
+	memFree(pFile, sizeof(*pFile));
 	systemGetBlitterFromOs();
 	systemUnuse();
+#endif
+}
+
+ULONG fileRead(tFile *pFile, void *pDest, ULONG ulSize) {
+	return fileReadBytes(pFile, (UBYTE *)pDest, ulSize);
+}
+
+ULONG fileWrite(tFile *pFile, const void *pSrc, ULONG ulSize) {
+	return fileWriteBytes(pFile, pSrc, ulSize);
 }
 
 ULONG fileReadBytes(tFile *pFile, UBYTE *pDest, ULONG ulSize) {
-	ULONG ulReadCount = fileReadData(pFile, pDest, sizeof(UBYTE), ulSize);
-	return ulReadCount;
+	return fileReadData(pFile, pDest, sizeof(UBYTE), ulSize);
 }
 
 ULONG fileReadWords(tFile *pFile, UWORD *pDest, ULONG ulSize) {
-	ULONG ulReadCount = fileReadData(pFile, pDest, sizeof(UWORD), ulSize);
-	return ulReadCount;
+	return fileReadData(pFile, pDest, sizeof(UWORD), ulSize);
 }
 
 ULONG fileReadLongs(tFile *pFile, ULONG *pDest, ULONG ulSize) {
-	ULONG ulReadCount = fileReadData(pFile, pDest, sizeof(ULONG), ulSize);
-	return ulReadCount;
+	return fileReadData(pFile, pDest, sizeof(ULONG), ulSize);
 }
 
-
 ULONG fileWriteBytes(tFile *pFile, const void *pSrc, ULONG ulSize) {
-	ULONG ulWriteCount = fileWriteData(pFile, pSrc, sizeof(UBYTE), ulSize);
-	return ulWriteCount;
+	return fileWriteData(pFile, pSrc, sizeof(UBYTE), ulSize);
 }
 
 ULONG fileWriteWords(tFile *pFile, const void *pSrc, ULONG ulSize) {
-	ULONG ulWriteCount = fileWriteData(pFile, pSrc, sizeof(UWORD), ulSize);
-	return ulWriteCount;
+	return fileWriteData(pFile, pSrc, sizeof(UWORD), ulSize);
 }
 
 ULONG fileWriteLongs(tFile *pFile, const void *pSrc, ULONG ulSize) {
-	ULONG ulWriteCount = fileWriteData(pFile, pSrc, sizeof(ULONG), ulSize);
-	return ulWriteCount;
+	return fileWriteData(pFile, pSrc, sizeof(ULONG), ulSize);
 }
 
-ULONG fileSeek(tFile *pFile, ULONG ulPos, WORD wMode) {
+ULONG fileSeek(tFile *pFile, LONG lPos, WORD wMode) {
 	systemUse();
 	systemReleaseBlitterToOs();
-	ULONG ulResult = fseek(pFile, ulPos, wMode);
+#if defined(ACE_FILE_USE_ONLY_DISK)
+	ULONG ulResult = diskFileSeek(pFile, lPos, wMode);
+#else
+	ULONG ulResult = pFile->pCallbacks->cbFileSeek(pFile->pData, lPos, wMode);
+#endif
 	systemGetBlitterFromOs();
 	systemUnuse();
 
@@ -184,7 +212,11 @@ ULONG fileSeek(tFile *pFile, ULONG ulPos, WORD wMode) {
 ULONG fileGetPos(tFile *pFile) {
 	systemUse();
 	systemReleaseBlitterToOs();
-	ULONG ulResult = ftell(pFile);
+#if defined(ACE_FILE_USE_ONLY_DISK)
+	ULONG ulResult = diskFileGetPos(pFile);
+#else
+	ULONG ulResult = pFile->pCallbacks->cbFileGetPos(pFile->pData);
+#endif
 	systemGetBlitterFromOs();
 	systemUnuse();
 
@@ -194,7 +226,11 @@ ULONG fileGetPos(tFile *pFile) {
 UBYTE fileIsEof(tFile *pFile) {
 	systemUse();
 	systemReleaseBlitterToOs();
-	UBYTE ubResult = feof(pFile);
+#if defined(ACE_FILE_USE_ONLY_DISK)
+	UBYTE ubResult = diskFileIsEof(pFile);
+#else
+	UBYTE ubResult = pFile->pCallbacks->cbFileIsEof(pFile->pData);
+#endif
 	systemGetBlitterFromOs();
 	systemUnuse();
 
@@ -205,8 +241,32 @@ UBYTE fileIsEof(tFile *pFile) {
 LONG fileVaPrintf(tFile *pFile, const char *szFmt, va_list vaArgs) {
 	systemUse();
 	systemReleaseBlitterToOs();
-	LONG lResult = vfprintf(pFile, szFmt, vaArgs);
-	fflush(pFile);
+	char stackBuf[512];
+	va_list copy;
+	va_copy(copy, vaArgs);
+	int n = vsnprintf(stackBuf, sizeof stackBuf, szFmt, copy);
+	va_end(copy);
+	LONG lResult;
+	if(n >= 0 && n < (int)sizeof(stackBuf)) {
+		lResult = (LONG)fileWriteBytes(pFile, stackBuf, (ULONG)n);
+	}
+	else if(n > 0) {
+		char *pHeap = (char *)memAllocFast((ULONG)n + 1);
+		if(!pHeap) {
+			lResult = -1;
+		}
+		else {
+			va_copy(copy, vaArgs);
+			vsnprintf(pHeap, (ULONG)n + 1, szFmt, copy);
+			va_end(copy);
+			lResult = (LONG)fileWriteBytes(pFile, pHeap, (ULONG)n);
+			memFree(pHeap, (ULONG)n + 1);
+		}
+	}
+	else {
+		lResult = -1;
+	}
+	fileFlush(pFile);
 	systemGetBlitterFromOs();
 	systemUnuse();
 	return lResult;
@@ -221,12 +281,10 @@ LONG filePrintf(tFile *pFile, const char *szFmt, ...) {
 }
 
 LONG fileVaScanf(tFile *pFile, const char *szFmt, va_list vaArgs) {
-	systemUse();
-	systemReleaseBlitterToOs();
-	LONG lResult = vfscanf(pFile, szFmt, vaArgs);
-	systemGetBlitterFromOs();
-	systemUnuse();
-	return lResult;
+	(void)pFile;
+	(void)szFmt;
+	(void)vaArgs;
+	return -1;
 }
 
 LONG fileScanf(tFile *pFile, const char *szFmt, ...) {
@@ -241,7 +299,11 @@ LONG fileScanf(tFile *pFile, const char *szFmt, ...) {
 void fileFlush(tFile *pFile) {
 	systemUse();
 	systemReleaseBlitterToOs();
-	fflush(pFile);
+#if defined(ACE_FILE_USE_ONLY_DISK)
+	diskFileFlush(pFile);
+#else
+	pFile->pCallbacks->cbFileFlush(pFile->pData);
+#endif
 	systemGetBlitterFromOs();
 	systemUnuse();
 }

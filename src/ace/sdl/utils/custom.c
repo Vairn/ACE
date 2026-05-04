@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <ace/utils/custom.h>
+#include <ace/managers/system.h>
 #include <ace/managers/sdl_private.h>
 
 tRayPos getRayPos(void) {

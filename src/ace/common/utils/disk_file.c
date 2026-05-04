@@ -105,7 +105,9 @@ DISKFILE_PRIVATE ULONG diskFileRead(void *pData, void *pDest, ULONG ulSize) {
 		if(!pDiskFileData->isUninterrupted) {
 			fileAccessEnable();
 		}
-		ULONG ulReadPartSize = fread(pDestBytes, ulSize, 1, pDiskFileData->pFileHandle);
+		/* fread(..., size, 1) returns element count (0|1), not bytes — use size 1, Nmemb for byte count */
+		ULONG ulReadPartSize = (ULONG)fread(
+			pDestBytes, 1, ulSize, pDiskFileData->pFileHandle);
 		pDestBytes += ulReadPartSize;
 		ulReadCount += ulReadPartSize;
 		ulSize -= ulReadPartSize;
@@ -122,8 +124,8 @@ DISKFILE_PRIVATE ULONG diskFileRead(void *pData, void *pDest, ULONG ulSize) {
 				fileAccessEnable();
 			}
 
-			pDiskFileData->uwBufferFill = fread(
-				pDiskFileData->pBuffer, DISK_FILE_BUFFER_SIZE, 1,
+			pDiskFileData->uwBufferFill = (UWORD)fread(
+				pDiskFileData->pBuffer, 1, DISK_FILE_BUFFER_SIZE,
 				pDiskFileData->pFileHandle
 			);
 
@@ -181,7 +183,8 @@ DISKFILE_PRIVATE ULONG diskFileWrite(void *pData, const void *pSrc, ULONG ulSize
 			ulWritten = ulSize;
 		}
 		else {
-			ulWritten = fwrite(pSrc, ulSize, 1, pDiskFileData->pFileHandle);
+			ulWritten = (ULONG)fwrite(
+				pSrc, 1, ulSize, pDiskFileData->pFileHandle);
 		}
 
 		if(!pDiskFileData->isUninterrupted) {

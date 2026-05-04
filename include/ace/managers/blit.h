@@ -41,17 +41,28 @@ extern "C" {
 #define MINTERM_C 0xAA
 #define MINTERM_A_OR_C 0xFA
 #define MINTERM_NAC 0x0A
+/** @brief Alias: (~A) & C — same minterm as @ref MINTERM_NAC */
+#define MINTERM_NA_AND_C MINTERM_NAC
 #define MINTERM_COOKIE 0xCA
 #define MINTERM_REVERSE_COOKIE 0xAC
 #define MINTERM_COPY 0xC0
 #define MINTERM_AB_OR_C 0xEA
 #define MINTERM_CLEAR_C_ON_AB 0x2A
 
+#if defined(AMIGA)
 typedef enum tBlitLineMode {
 	BLIT_LINE_MODE_OR = ((ABC | ABNC | NABC | NANBC) | (SRCA | SRCC | DEST)),
 	BLIT_LINE_MODE_XOR = ((ABNC | NABC | NANBC) | (SRCA | SRCC | DEST)),
 	BLIT_LINE_MODE_ERASE = ((NABC | NANBC | ANBC) | (SRCA | SRCC | DEST)),
 } tBlitLineMode;
+#else
+/** Host/SDL: hardware minterms unavailable; values are placeholders for API compatibility. */
+typedef enum tBlitLineMode {
+	BLIT_LINE_MODE_OR = 0,
+	BLIT_LINE_MODE_XOR = 1,
+	BLIT_LINE_MODE_ERASE = 2,
+} tBlitLineMode;
+#endif
 
 /**
  * @brief Creates and initializes the blitter manager.

@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <ace/managers/timer.h>
+#include <stdio.h>
 
 ULONG timerGetDelta(ULONG ulStart, ULONG ulStop) {
 	if(ulStop >= ulStart) {
@@ -34,20 +35,20 @@ void timerFormatPrec(char *szBfr, ULONG ulPrecTime) {
 	ulRest = ulResult % 10;
 	ulResult = ulResult / 10;
 	if(ulResult < 1000) {
-		sprintf(szBfr, "%3lu.%01lu us", ulResult, ulRest);
+		sprintf(szBfr, "%3u.%01u us", ulResult, ulRest);
 		return;
 	}
 	// ulResult [ms]
 	ulRest = ulResult % 1000;
 	ulResult /= 1000;
 	if(ulResult < 1000) {
-		sprintf(szBfr, "%3lu.%03lu ms", ulResult, ulRest);
+		sprintf(szBfr, "%3u.%03u ms", ulResult, ulRest);
 		return;
 	}
 	// ulResult [s]
 	ulRest = ulResult % 1000;
 	ulResult /= 1000;
-	sprintf(szBfr, "%lu.%03lu s", ulResult, ulRest);
+	sprintf(szBfr, "%u.%03u s", ulResult, ulRest);
 }
 
 void timerWaitUs(UWORD uwUsCnt) {

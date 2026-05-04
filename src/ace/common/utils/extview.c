@@ -7,13 +7,16 @@
 #include <ace/managers/system.h>
 #include <ace/utils/tag.h>
 #include <ace/generic/screen.h>
+#ifdef ACE_SDL
+#include <ace/managers/sdl_private.h>
+#endif
 
 static UBYTE s_isPAL;
 
 tView *viewCreate(void *pTags, ...) {
 
 	logBlockBegin("viewCreate(pTags: %p)", pTags);
-#ifdef AMIGA
+#if defined(AMIGA) || defined(ACE_SDL)
 
 	s_isPAL = systemIsPal();
 
@@ -24,7 +27,8 @@ tView *viewCreate(void *pTags, ...) {
 	va_list vaTags;
 	va_start(vaTags, pTags);
 
-	// Process copperlist raw/block tags
+	// Process copperlist raw/block tags (Amiga hardware only)
+#ifdef AMIGA
 	if (
 		tagGet(pTags, vaTags, TAG_VIEW_COPLIST_MODE, VIEW_COPLIST_MODE_BLOCK) == VIEW_COPLIST_MODE_RAW)
 	{
@@ -39,6 +43,9 @@ tView *viewCreate(void *pTags, ...) {
 	{
 		pView->pCopList = copListCreate(0, TAG_DONE);
 	}
+#else
+	pView->pCopList = 0;
+#endif
 
 	// Global display mode tags
 	if(tagGet(pTags, vaTags, TAG_VIEW_GLOBAL_PALETTE, 1)) {
@@ -128,17 +135,23 @@ tView *viewCreate(void *pTags, ...) {
 #else
 	logBlockEnd("viewCreate()");
 	return 0;
-#endif // AMIGA
+#endif
 }
 
 void viewDestroy(tView *pView)
 {
 	logBlockBegin("viewDestroy(pView: %p)", pView);
+#if defined(AMIGA) || defined(ACE_SDL)
 #ifdef AMIGA
 	if (g_sCopManager.pCopList == pView->pCopList)
 	{
 		viewLoad(0);
 	}
+#else
+	if(sdlGetCurrentView() == pView) {
+		sdlSetCurrentView(0);
+	}
+#endif
 
 	// Free all attached viewports
 	while (pView->pFirstVPort)
@@ -147,10 +160,12 @@ void viewDestroy(tView *pView)
 	}
 
 	// Free view
+#ifdef AMIGA
 	logWrite("Freeing copperlists...\n");
 	copListDestroy(pView->pCopList);
+#endif
 	memFree(pView, sizeof(tView));
-#endif // AMIGA
+#endif
 	logBlockEnd("viewDestroy()");
 }
 
@@ -175,7 +190,7 @@ void viewProcessManagers(tView *pView)
 }
 
 void viewUpdateGlobalPalette(const tView *pView) {
-#ifdef AMIGA
+#if defined(AMIGA)
 	if (pView->uwFlags & VIEW_FLAG_GLOBAL_PALETTE)
 	{
 		// for(UBYTE i = 0; i < 32; ++i) {
@@ -222,8 +237,12 @@ void viewUpdateGlobalPalette(const tView *pView) {
 		}
 	}
 	#endif // ACE_USE_AGA_FEATURES
-}
-#endif // AMIGA
+	}
+#elif defined(ACE_SDL)
+	if(pView->uwFlags & VIEW_FLAG_GLOBAL_PALETTE) {
+		sdlSetCurrentView((tView *)pView);
+	}
+#endif
 }
 
 tVPort *vPortCreate(void *pTagList, ...)
@@ -231,7 +250,7 @@ tVPort *vPortCreate(void *pTagList, ...)
 	logBlockBegin("vPortCreate(pTagList: %p)", pTagList);
 	va_list vaTags;
 	va_start(vaTags, pTagList);
-#ifdef AMIGA
+#if defined(AMIGA) || defined(ACE_SDL)
 	s_isPAL = systemIsPal();
 
 	tVPort *pVPort = memAllocFastClear(sizeof(tVPort));
@@ -372,7 +391,7 @@ tVPort *vPortCreate(void *pTagList, ...)
 	va_end(vaTags);
 	logBlockEnd("vPortCreate()");
 	return pVPort;
-#endif // AMIGA
+#endif /* AMIGA || ACE_SDL */
 fail:
 	va_end(vaTags);
 	logBlockEnd("vPortCreate()");

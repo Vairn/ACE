@@ -28,7 +28,7 @@ void paletteLoadFromFd(tFile *pFile, UWORD *pPalette, UWORD uwMaxLength) {
 	}
 
 	UBYTE ubFirst;
-	fileRead(pFile, &ubFirst, sizeof(UBYTE));
+	fileReadBytes(pFile, &ubFirst, sizeof(UBYTE));
 
 	if(ubFirst > 1) {
 #ifdef ACE_DEBUG
@@ -44,7 +44,7 @@ void paletteLoadFromFd(tFile *pFile, UWORD *pPalette, UWORD uwMaxLength) {
 	}
 
 	UWORD uwNumInFile;
-	fileRead(pFile, &uwNumInFile, sizeof(UWORD));
+	fileReadWords(pFile, &uwNumInFile, 1);
 	uwNumInFile = endianBig16(uwNumInFile);
 	UWORD uwColorsRead = MIN(uwNumInFile, uwMaxLength);
 
@@ -54,10 +54,10 @@ void paletteLoadFromFd(tFile *pFile, UWORD *pPalette, UWORD uwMaxLength) {
 	);
 
 	if(ubFirst == PLT_NEW_ECS) {
-		fileRead(pFile, pPalette, sizeof(UWORD) * uwColorsRead);
+		fileReadWords(pFile, pPalette, uwColorsRead);
 	}
 	else {
-		fileRead(pFile, pPalette, sizeof(ULONG) * uwColorsRead);
+		fileReadLongs(pFile, (ULONG *)pPalette, uwColorsRead);
 	}
 
 	fileClose(pFile);
@@ -80,12 +80,12 @@ void paletteSave(const UWORD *pPalette, UWORD uwColorCnt, char *szPath) {
 
 	UBYTE ubSentinel = PLT_NEW_ECS;
 
-	fileWrite(pFile, &ubSentinel, sizeof(UBYTE));
+	fileWriteBytes(pFile, &ubSentinel, sizeof(UBYTE));
 	{
 		UWORD uwWire = endianBig16(uwColorCnt);
-		fileWrite(pFile, &uwWire, sizeof(UWORD));
+		fileWriteWords(pFile, &uwWire, 1);
 	}
-	fileWrite(pFile, pPalette, sizeof(UWORD) * uwColorCnt);
+	fileWriteBytes(pFile, pPalette, sizeof(UWORD) * uwColorCnt);
 	fileClose(pFile);
 
 	logBlockEnd("paletteSave()");
@@ -107,10 +107,10 @@ void paletteSaveAGA(const ULONG *pPalette, UWORD uwColorCnt, char *szPath) {
 
 	UBYTE ubSentinel = PLT_NEW_AGA;
 
-	fileWrite(pFile, &ubSentinel, sizeof(UBYTE));
+	fileWriteBytes(pFile, &ubSentinel, sizeof(UBYTE));
 	{
 		UWORD uwWire = endianBig16(uwColorCnt);
-		fileWrite(pFile, &uwWire, sizeof(UWORD));
+		fileWriteWords(pFile, &uwWire, 1);
 	}
 
 	for(UWORD i = 0; i < uwColorCnt; ++i) {
@@ -120,10 +120,10 @@ void paletteSaveAGA(const ULONG *pPalette, UWORD uwColorCnt, char *szPath) {
 		UBYTE ubG = (ul >> 8) & 0xFF;
 		UBYTE ubB = ul & 0xFF;
 
-		fileWrite(pFile, &ubA, sizeof(UBYTE));
-		fileWrite(pFile, &ubR, sizeof(UBYTE));
-		fileWrite(pFile, &ubG, sizeof(UBYTE));
-		fileWrite(pFile, &ubB, sizeof(UBYTE));
+		fileWriteBytes(pFile, &ubA, sizeof(UBYTE));
+		fileWriteBytes(pFile, &ubR, sizeof(UBYTE));
+		fileWriteBytes(pFile, &ubG, sizeof(UBYTE));
+		fileWriteBytes(pFile, &ubB, sizeof(UBYTE));
 	}
 
 	fileClose(pFile);

@@ -2,8 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifdef AMIGA
 #include <proto/exec.h> // Bartman's compiler needs this
 #include <proto/dos.h> // Bartman's compiler needs this
+#else
+#include <stdlib.h>
+#include <string.h>
+#endif
 #include <ace/managers/memory.h>
 #include <ace/managers/system.h>
 #include <ace/managers/log.h>
@@ -216,7 +221,10 @@ void _memFreeDbg(
 	_memCheckIntegrity(uwLine, szFile);
 	ulSize = _memEntryDelete(pMem, ulSize, uwLine, szFile);
 	if(ulSize) {
-		_memFreeRls(pMem - sizeof(ULONG), ulSize + 2 * sizeof(ULONG));
+		/* Must match _memAllocDbg: returned ptr is base + 2 ULONG; raw size is ulSize + 4 ULONG. */
+		_memFreeRls(
+			pMem - 2 * sizeof(ULONG),
+			ulSize + 4 * sizeof(ULONG));
 	}
 	systemUnuse();
 }
@@ -232,7 +240,10 @@ void *_memAllocRls(ULONG ulSize, ULONG ulFlags) {
 		pResult = AllocMem(ulSize, (ulFlags & ~MEMF_FAST) | MEMF_ANY);
 	}
 	#else
-	pResult =  malloc(ulSize);
+	pResult = malloc(ulSize);
+	if(pResult && (ulFlags & MEMF_CLEAR)) {
+		memset(pResult, 0, ulSize);
+	}
 	#endif // AMIGA
 	systemUnuse();
 	return pResult;
@@ -284,9 +295,17 @@ UBYTE memType(const void *pMem) {
 }
 
 ULONG memGetFreeChipSize(void) {
+#ifdef AMIGA
 	return AvailMem(MEMF_CHIP);
+#else
+	return 0;
+#endif
 }
 
 ULONG memGetFreeSize(void) {
+#ifdef AMIGA
 	return AvailMem(MEMF_ANY);
+#else
+	return 0;
+#endif
 }

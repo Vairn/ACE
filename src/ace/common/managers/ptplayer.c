@@ -6,24 +6,31 @@
 #include <ace/managers/ptplayer_private.h>
 #include <ace/managers/system.h>
 #include <ace/utils/file.h>
+#include <ace/utils/disk_file.h>
 
 tPtplayerMod *ptplayerModCreate(const char *szPath) {
 	logBlockBegin("ptplayerModCreate(szPath: '%s')", szPath);
 
 	tPtplayerMod *pMod = 0;
-	LONG lSize = fileGetSize(szPath);
+	tFile *pFileMod = diskFileOpen(szPath, DISK_FILE_MODE_READ, 1);
+	if(!pFileMod) {
+		logWrite("ERR: File doesn't exist!\n");
+		return 0;
+	}
+	LONG lSize = fileGetSize(pFileMod);
 	if(lSize == -1) {
+		fileClose(pFileMod);
 		logWrite("ERR: File doesn't exist!\n");
 		return 0;
 	}
 
 	pMod = memAllocFastClear(sizeof(*pMod));
 	if(!pMod) {
+		fileClose(pFileMod);
 		return 0;
 	}
 
-	// Read header
-	tFile *pFileMod = fileOpen(szPath, "rb");
+	// Read header (pFileMod already open)
 	fileReadBytes(pFileMod, (UBYTE*)pMod->szSongName, sizeof(pMod->szSongName));
 	for(UBYTE i = 0; i < PTPLAYER_SAMPLE_HEADER_COUNT; ++i) {
 		fileReadWords(pFileMod, &pMod->pSampleHeaders[i].uwLength, 1);
@@ -102,7 +109,7 @@ void ptplayerModDestroy(tPtplayerMod *pMod) {
 tPtplayerSfx *ptplayerSfxCreateFromFile(const char *szPath, UBYTE isFast) {
 	systemUse();
 	logBlockBegin("ptplayerSfxCreateFromFile(szPath: '%s', isFast: %hhu)", szPath, isFast);
-	tFile *pFileSfx = fileOpen(szPath, "rb");
+	tFile *pFileSfx = diskFileOpen(szPath, DISK_FILE_MODE_READ, 1);
 	tPtplayerSfx *pSfx = 0;
 	if(!pFileSfx) {
 		logWrite("ERR: File doesn't exist: '%s'\n", szPath);
@@ -128,7 +135,7 @@ tPtplayerSfx *ptplayerSfxCreateFromFile(const char *szPath, UBYTE isFast) {
 		if(!pSfx->pData) {
 			goto fail;
 		}
-		fileReadBytes(pFileSfx, pSfx->pData, pSfx->uwWordLength * sizeof(UWORD));
+		fileReadBytes(pFileSfx, (UBYTE *)pSfx->pData, pSfx->uwWordLength * sizeof(UWORD));
 
 		// Check if pData[0] is zeroed-out - it should be because after sfx playback
 		// ptplayer sets the channel playback to looped first word. This should

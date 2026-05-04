@@ -45,7 +45,22 @@ typedef struct tFile {
 } tFile;
 #endif
 
+/**
+ * @brief Opens a file on the host filesystem (Amiga: DOS via disk layer).
+ */
+tFile *fileOpen(const char *szPath, const char *szMode);
+
 void fileClose(tFile *pFile);
+
+/**
+ * @brief Read bytes from an open tFile (alias of fileReadBytes for FILE-like use).
+ */
+ULONG fileRead(tFile *pFile, void *pDest, ULONG ulSize);
+
+/**
+ * @brief Write bytes to an open tFile.
+ */
+ULONG fileWrite(tFile *pFile, const void *pSrc, ULONG ulSize);
 
 ULONG fileReadBytes(tFile *pFile, UBYTE *pDest, ULONG ulSize);
 
@@ -75,6 +90,11 @@ void fileFlush(tFile *pFile);
  * @return On fail -1, otherwise file size in bytes.
  */
 LONG fileGetSize(tFile *pFile);
+
+/**
+ * @brief Returns file size by filesystem path (does not keep a handle open).
+ */
+LONG fileGetPathSize(const char *szPath);
 
 void fileWriteStr(tFile *pFile, const char *szLine);
 

@@ -10,6 +10,10 @@
 #include <SDL_keycode.h>
 #include <SDL_GameController.h>
 
+struct SDL_Window;
+
+struct SDL_Window *sdlGetWindow(void);
+
 typedef void (*tSdlKeyHandler)(UBYTE isPressed, SDL_KeyCode eKeyCode);
 typedef void (*tSdlVblankHandler)(void);
 typedef void (*tSdlJoyButtonHandler)(SDL_JoystickID lId, SDL_GameControllerButton eButton, UBYTE isPressed);

@@ -78,7 +78,10 @@ static void spriteOnRender(void) {
 	}
 }
 
-void spriteManagerCreate(const tView *pView, UWORD uwRawCopPos) {
+void spriteManagerCreate(const tView *pView, UWORD uwRawCopPos, ULONG pBlankSprite[1]) {
+	(void)pView;
+	(void)uwRawCopPos;
+	(void)pBlankSprite;
 	for(UBYTE i = HARDWARE_SPRITE_CHANNEL_COUNT; i--;) {
 		s_pChannelsData[i] = (tSpriteChannel){
 			.pFirstSprite = 0

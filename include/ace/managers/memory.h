@@ -42,6 +42,8 @@ extern "C" {
  */
 UBYTE memIsChip(const void *pMem);
 
+UBYTE memType(const void *pMem);
+
 ULONG memGetFreeChipSize(void);
 
 ULONG memGetFreeSize(void);

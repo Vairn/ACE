@@ -2996,7 +2996,7 @@ tPtplayerSamplePack *ptplayerSamplePackCreate(const char *szPath) {
 	logBlockBegin("ptplayerSamplePackCreate(szPath: '%s')", szPath);
 	systemUse();
 	tPtplayerSamplePack *pSamplePack = 0;
-	LONG lSize = fileGetSize(szPath);
+	LONG lSize = fileGetPathSize(szPath);
 	if(lSize <= 0) {
 		logWrite("ERR: Invalid file size. File exists?\n");
 		goto fail;

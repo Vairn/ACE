@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifdef AMIGA
 #include <proto/graphics.h> // Bartman's compiler needs this
+#endif
 #include <ace/macros.h>
 #include <ace/managers/system.h>
 #include <ace/utils/font.h>
@@ -53,7 +55,7 @@ tFont *fontCreateFromFd(tFile *pFontFile) {
 	fileRead(pFontFile, pFont->pCharOffsets, sizeof(UWORD) * pFont->ubChars);
 
 	pFont->pRawData = bitmapCreate(pFont->uwWidth, pFont->uwHeight, 1, 0);
-#ifdef AMIGA
+#if defined(AMIGA) || defined(ACE_SDL)
 	UWORD uwPlaneByteSize = ((pFont->uwWidth+15)/16) * 2 * pFont->uwHeight;
 	fileRead(pFontFile, pFont->pRawData->Planes[0], uwPlaneByteSize);
 #else
@@ -62,7 +64,7 @@ tFont *fontCreateFromFd(tFile *pFontFile) {
 	fileClose(pFontFile);
 	logBlockEnd("fontCreateFromFd()");
 	return 0;
-#endif // AMIGA
+#endif
 
 	fileClose(pFontFile);
 	logBlockEnd("fontCreateFromFd()");
@@ -273,7 +275,7 @@ void fontDrawTextBitMap(
 	}
 
 	// Helper destination bitmap
-#if defined(AMIGA)
+#if defined(AMIGA) || defined(ACE_SDL)
 	s_sTmpDest.BytesPerRow = pDest->BytesPerRow;
 	s_sTmpDest.Rows = pDest->Rows;
 	s_sTmpDest.Depth = 1;
