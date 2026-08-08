@@ -14,7 +14,6 @@ static void dualPfBufferInitializeCopperList(tDualPfBufferManager *pManager) {
 	const tVPort *pVPort = pManager->sCommon.pVPort;
 	UBYTE ubBppPf1 = pVPort->ubBppPf1;
 	UBYTE ubBppPf2 = pVPort->ubBppPf2;
-	UBYTE ubTotalBpp = ubBppPf1 + ubBppPf2;
 
 	LONG lBplOffsPf1 = fetchModeGetInitialBplOffset(pVPort);
 	LONG lBplOffsPf2 = fetchModeGetInitialBplOffset(pVPort);
@@ -27,8 +26,6 @@ static void dualPfBufferInitializeCopperList(tDualPfBufferManager *pManager) {
 	copMove(pCopList, pBlock, &g_pCustom->bplcon1, 0);
 
 	// Modulo for each field
-	pVPort->uwPf1Modulo = pManager->uwModuloPf1;
-	pVPort->uwPf2Modulo = pManager->uwModuloPf2;
 	copMove(pCopList, pBlock, &g_pCustom->bpl1mod, pManager->uwModuloPf1); // odd slots: PF1
 	copMove(pCopList, pBlock, &g_pCustom->bpl2mod, pManager->uwModuloPf2); // even slots: PF2
 

@@ -20,6 +20,10 @@ extern "C" {
 #include <ace/managers/memory.h>
 #include <ace/managers/copper.h>
 
+#ifdef ACE_USE_DUAL_PF
+#include <ace/utils/bitmap.h>
+#endif
+
 typedef enum tTagView {
 	// Copperlist mode: raw/block
 	TAG_VIEW_COPLIST_MODE      = TAG_USER | 1,
@@ -75,7 +79,6 @@ typedef enum tTagVport {
 	TAG_VPORT_FMODE        = TAG_USER | 10,
 #endif
 #ifdef ACE_USE_DUAL_PF
-#include <ace/utils/bitmap.h>
 	TAG_VPORT_DUAL_PF    = TAG_USER | 11, // UBYTE: enable dual PF
 	TAG_VPORT_BPP_PF1    = TAG_USER | 12, // UBYTE: PF1 bitplane count
 	TAG_VPORT_BPP_PF2    = TAG_USER | 13, // UBYTE: PF2 bitplane count
