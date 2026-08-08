@@ -149,4 +149,10 @@ static inline LONG fetchModeCalcBplOffsetX(const tVPort *pVPort, UWORD uwScrollX
 	}
 }
 
+#ifdef ACE_USE_DUAL_PF
+static inline UWORD fetchModeCalcBplShiftDualPf(UBYTE ubShiftPf1, UBYTE ubShiftPf2) {
+	return (ubShiftPf2 << 4) | ubShiftPf1;
+}
+#endif
+
 #endif // _ACE_UTILS_FETCHMODE_H_

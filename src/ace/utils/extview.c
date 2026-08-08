@@ -219,6 +219,12 @@ static UWORD viewBuildBplCon0(const tView *pView) {
 		uwBplCon0 |= BV(15);
 	}
 
+#ifdef ACE_USE_DUAL_PF
+	if(pVPort->eFlags & VP_FLAG_DUAL_PF) {
+		uwBplCon0 |= BV(10); // PF2E bit
+	}
+#endif
+
 	return uwBplCon0;
 }
 
@@ -364,6 +370,19 @@ tVPort *vPortCreate(void *pTagList, ...) {
 	}
 	const UBYTE ubDefaultFmode = 0;
 	pVPort->ubFmode = tagGet(pTagList, vaTags, TAG_VPORT_FMODE, ubDefaultFmode);
+#endif
+
+#ifdef ACE_USE_DUAL_PF
+	if(tagGet(pTagList, vaTags, TAG_VPORT_DUAL_PF, 0)) {
+		pVPort->eFlags |= VP_FLAG_DUAL_PF;
+		pVPort->ubBppPf1 = tagGet(pTagList, vaTags, TAG_VPORT_BPP_PF1, 2);
+		pVPort->ubBppPf2 = tagGet(pTagList, vaTags, TAG_VPORT_BPP_PF2, 2);
+		UBYTE ubTotal = pVPort->ubBppPf1 + pVPort->ubBppPf2;
+		if(ubTotal > 6) {
+			logWrite("ERR: dual-PF total BPP %hhu > 6 (OCS limit)\n", ubTotal);
+		}
+		pVPort->ubBpp = ubTotal;
+	}
 #endif
 
 	// Get dimensions

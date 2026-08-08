@@ -74,6 +74,12 @@ typedef enum tTagVport {
 	TAG_VPORT_USES_AGA     = TAG_USER | 9,
 	TAG_VPORT_FMODE        = TAG_USER | 10,
 #endif
+#ifdef ACE_USE_DUAL_PF
+#include <ace/utils/bitmap.h>
+	TAG_VPORT_DUAL_PF    = TAG_USER | 11, // UBYTE: enable dual PF
+	TAG_VPORT_BPP_PF1    = TAG_USER | 12, // UBYTE: PF1 bitplane count
+	TAG_VPORT_BPP_PF2    = TAG_USER | 13, // UBYTE: PF2 bitplane count
+#endif
 } tTagVport;
 
 
@@ -99,8 +105,11 @@ typedef enum tViewFlags {
 typedef enum tVpFlag {
 	VP_FLAG_HAS_OWN_PALETTE = BV(0),
 	VP_FLAG_HIRES           = BV(1),
+#ifdef ACE_USE_DUAL_PF
+	VP_FLAG_DUAL_PF        = BV(2),
+#endif
 #ifdef ACE_USE_AGA_FEATURES
-	VP_FLAG_AGA            = BV(2),
+	VP_FLAG_AGA            = BV(3),
 #endif
 } tVpFlag;
 
@@ -169,6 +178,13 @@ typedef struct _tVPort {
 	UBYTE ubFmode;      ///< FMODE value
 #endif
 	UWORD *pPalette;
+#ifdef ACE_USE_DUAL_PF
+	UBYTE ubBppPf1;    // Bitplane count for PF1 (OCS: 1-3)
+	UBYTE ubBppPf2;    // Bitplane count for PF2 (OCS: 1-3)
+	tBitMap *pPf2Front, *pPf2Back;
+	UWORD uwPf1Modulo;
+	UWORD uwPf2Modulo;
+#endif
 } tVPort;
 
 /* Globals */

@@ -45,6 +45,8 @@ set(
 
 include(cmake/ace_config.cmake)
 
+option(ACE_USE_DUAL_PF "Enable dual playfield support (PF2E)" OFF)
+
 # Linux/other UNIX get a lower-case binary name
 set(TARGET_NAME ${PROJECT_NAME_LOWER})
 
@@ -77,6 +79,9 @@ if(ACE_BOB_PRISTINE_BUFFER)
 endif()
 if(ACE_USE_ECS_FEATURES)
 	target_compile_definitions(${TARGET_NAME} PUBLIC ACE_USE_ECS_FEATURES)
+endif()
+if(ACE_USE_DUAL_PF)
+	target_compile_definitions(${TARGET_NAME} PUBLIC ACE_USE_DUAL_PF)
 endif()
 target_compile_definitions(${TARGET_NAME} PUBLIC ACE_TILEBUFFER_TILE_TYPE=${ACE_TILEBUFFER_TILE_TYPE})
 if(ACE_SCROLLBUFFER_POT_BITMAP_HEIGHT)
