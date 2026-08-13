@@ -8,6 +8,7 @@
 #include <ace/managers/system.h>
 #include <ace/managers/misc_resource.h>
 #include <ace/utils/disk_file.h>
+#include <stdio.h>
 #ifdef ACE_DEBUG
 
 // Globals
@@ -112,6 +113,10 @@ void _logWriteVa(char *szFormat, va_list vaArgs) {
 
 	vsprintf(&s_szMsg[uwOffs], szFormat, vaArgs);
 	printUae(s_szMsg);
+#ifdef ACE_HOST
+	fputs(s_szMsg, stdout);
+	fflush(stdout);
+#endif
 #if defined(ACE_DEBUG_SERIAL)
 	if(miscResourceIsUsed(MISC_SUBRESOURCE_SERIAL)) {
 		printSerial(s_szMsg);

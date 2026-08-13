@@ -1,0 +1,29 @@
+ACE host SDL chipset backend
+============================
+
+Keeps ACE copper/blit/extview/viewport sources. Defines AMIGA and ACE_HOST.
+Chipset time is DMA-slot based (Agnus), not instant blit.
+
+Dependencies: C compiler, CMake 3.14+, SDL2 (find_package or FetchContent SDL 2.30.8).
+MSYS2 UCRT: mingw-w64-ucrt-x86_64-gcc, mingw-w64-ucrt-x86_64-SDL2, ninja.
+Pass -DCMAKE_PREFIX_PATH=C:/msys64/ucrt64
+
+Showcase:
+  cmake -S showcase -B build-host -G Ninja -DACE_HOST=ON -DACE_DEBUG=ON -DCMAKE_PREFIX_PATH=C:/msys64/ucrt64
+  cmake --build build-host --parallel
+  cd build-host && showcase.exe
+
+Asset tools (font/palette/bitmap):
+  cmake -S tools -B tools/build-host -G Ninja
+  cmake --build tools/build-host --parallel
+Then reconfigure showcase so convertFont/convertBitmaps run.
+
+Amiga cross: leave ACE_HOST off. Without AMIGA or ACE_HOST, CMake SEND_ERROR.
+
+Flags:
+  ACE_HOST, ACE_HOST_MACHINE (A500, A500_512_512 default, A500_1MB, A600,
+  A1200 AGA default, A1200_4MB, A1200_8MB, A4000, CUSTOM),
+  ACE_HOST_MEM_MODE (STRICT|VIRTUAL), ACE_HOST_CHIP_SIZE, ACE_HOST_FAST_SIZE,
+  ACE_HOST_DEBUG, ACE_DEBUG.
+
+Keys: F11 memory HUD, F12 DMA/copper overlay, arrows+Ctrl = JOY1DAT.

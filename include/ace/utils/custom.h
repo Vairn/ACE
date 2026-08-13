@@ -16,6 +16,10 @@ extern "C" {
 #include <hardware/custom.h> // Custom chip register addresses
 
 #define REGPTR volatile * const
+#ifdef ACE_HOST
+#undef REGPTR
+#define REGPTR volatile *
+#endif
 #define HARDWARE_SPRITE_CHANNEL_COUNT 8
 
 #define SERDATRB_OVR  15
@@ -46,17 +50,25 @@ typedef struct Custom tCustom;
 typedef struct _tRayPos {
 	union {
 		struct {
+#ifdef ACE_HOST
+			/* LE overlay of (vposr<<16)|vhposr: H 0-7, V 8-16, laced bit 31. */
+			volatile unsigned bfPosX:8;
+			volatile unsigned bfPosY:9;
+			volatile unsigned bfUnused:14;
+			volatile unsigned bfLaced:1;
+#else
 			volatile unsigned bfLaced:1;   ///< 1 for interlaced screens
 			volatile unsigned bfUnused:14;
 			volatile unsigned bfPosY:9;    ///< PAL: 0..312, NTSC: 0..?
 			volatile unsigned bfPosX:8;    ///< 0..159?
+#endif
 		};
 		ULONG ulValue;
 	};
 } tRayPos;
 
 typedef struct _tCopperUlong {
-	UWORD uwHi; ///< upper WORD
+	UWORD uwHi; ///< upper WORD (Amiga BPLPTH/COP1LCH at even offset)
 	UWORD uwLo; ///< lower WORD
 } tCopperUlong;
 
@@ -112,14 +124,19 @@ typedef union tHardwareSpriteHeader {
 			};
 			UWORD uwRawPos; ///< Sprite's "position" word.
 		};
+#ifdef ACE_HOST
+#define ACE_BITFIELD unsigned short
+#else
+#define ACE_BITFIELD unsigned
+#endif
 		union {
 			BITFIELD_STRUCT {
-				unsigned bfStopY: 8; ///< Y stop position, bits 7..0.
-				unsigned bfAttach: 1; ///< Set to 1 for attached sprites. Odd sprites only!
-				unsigned bfReserved: 4;
-				unsigned bfStartYHi: 1; ///< Y start position, bit 8.
-				unsigned bfStopYHi: 1; ///< Y stop position, bit 8.
-				unsigned bfStartXLo: 1; ///< X start position, bit 0.
+				ACE_BITFIELD bfStopY: 8; ///< Y stop position, bits 7..0.
+				ACE_BITFIELD bfAttach: 1; ///< Set to 1 for attached sprites. Odd sprites only!
+				ACE_BITFIELD bfReserved: 4;
+				ACE_BITFIELD bfStartYHi: 1; ///< Y start position, bit 8.
+				ACE_BITFIELD bfStopYHi: 1; ///< Y stop position, bit 8.
+				ACE_BITFIELD bfStartXLo: 1; ///< X start position, bit 0.
 			};
 			UWORD uwRawCtl; ///< Sprite's "control" word.
 		};

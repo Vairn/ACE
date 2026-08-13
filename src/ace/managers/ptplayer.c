@@ -14,6 +14,7 @@
 #include <ace/managers/system.h>
 #include <ace/utils/custom.h>
 #include <ace/utils/disk_file.h>
+#include <ace/utils/endian.h>
 #include <hardware/intbits.h>
 #include <hardware/dmabits.h>
 
@@ -101,6 +102,14 @@ typedef struct _tModVoice {
 		ULONG ulData; // All voice data for quick copy / comparison
 	};
 } tModVoice;
+
+static inline UBYTE voiceCmdHi(const tModVoice *pVoice) {
+	return (UBYTE)(pVoice->uwCmd >> 8);
+}
+
+static inline UBYTE voiceCmdLo(const tModVoice *pVoice) {
+	return (UBYTE)(pVoice->uwCmd & 0xFF);
+}
 
 typedef struct _tChannelStatus {
 	tModVoice sVoice;
@@ -1263,13 +1272,13 @@ static void mt_playvoice(
 	}
 	pChannelData->sVoice.ulData = pVoice->ulData;
 
-	UWORD uwCmd = pChannelData->sVoice.ubCmdHi & 0x000F;
-	UWORD uwCmdArg = pChannelData->sVoice.ubCmdLo;
+	UWORD uwCmd = voiceCmdHi(&pChannelData->sVoice) & 0x000F;
+	UWORD uwCmdArg = voiceCmdLo(&pChannelData->sVoice);
 	UWORD uwMaskedCmdE = pChannelData->sVoice.uwCmd & 0x0FF0;
 
 	// Get sample start address from cmd/note - BA is sample number
 	UWORD uwSampleIdx = ( // A...B... -> ......BA
-		((pVoice->uwNote & 0xF000) >> 4) | (pVoice->ubCmdHi & 0xF0)
+		((pVoice->uwNote & 0xF000) >> 4) | (voiceCmdHi(pVoice) & 0xF0)
 	) >> 4;
 	if(uwSampleIdx) {
 		// Samples are internally zero-based, in file 1-based
@@ -1383,13 +1392,13 @@ static void mt_checkfx(
 		pChannelReg->ac_per = pChannelData->uwPeriod;
 	}
 	else {
-		UBYTE ubCmdIndex = (pChannelData->sVoice.ubCmdHi & 0xF);
+		UBYTE ubCmdIndex = (voiceCmdHi(&pChannelData->sVoice) & 0xF);
 #if defined(ACE_DEBUG_PTPLAYER)
 		if(ubCmdIndex >= 16) {
 			logWrite("ERR: fx_tab index out of range: cmd %hhu\n", ubCmdIndex);
 		}
 #endif
-		fx_tab[ubCmdIndex](pChannelData->sVoice.ubCmdLo, pChannelData, pChannelReg);
+		fx_tab[ubCmdIndex](voiceCmdLo(&pChannelData->sVoice), pChannelData, pChannelReg);
 	}
 }
 
@@ -2065,7 +2074,7 @@ static void mt_toneporta(
 	// uwCmd: 0x03'XY (xy = tone portamento speed)
 	if(ubArgs) {
 		pChannelData->n_toneportspeed = ubArgs;
-		pChannelData->sVoice.ubCmdLo = 0;
+		pChannelData->sVoice.uwCmd &= 0xFF00;
 	}
 	mt_toneporta_nc(pChannelData, pChannelReg);
 }
@@ -2853,6 +2862,16 @@ tPtplayerMod *ptplayerModCreateFromFd(tFile *pFileMod) {
 	fileRead(pFileMod, pMod->pArrangement, sizeof(pMod->pArrangement));
 	fileRead(pFileMod, pMod->pFileFormatTag, sizeof(pMod->pFileFormatTag));
 
+	{
+		UBYTE ubSampleIndex;
+		for(ubSampleIndex = 0; ubSampleIndex < PTPLAYER_MOD_SAMPLE_COUNT; ++ubSampleIndex) {
+			tPtplayerSampleHeader *pHdr = &pMod->pSampleHeaders[ubSampleIndex];
+			pHdr->uwLength = endianBig16(pHdr->uwLength);
+			pHdr->uwRepeatOffs = endianBig16(pHdr->uwRepeatOffs);
+			pHdr->uwRepeatLength = endianBig16(pHdr->uwRepeatLength);
+		}
+	}
+
 	// Get number of highest pattern
 	UBYTE ubLastPattern = 0;
 	for(UBYTE i = 0; i < 127; ++i) {
@@ -2871,6 +2890,14 @@ tPtplayerMod *ptplayerModCreateFromFd(tFile *pFileMod) {
 		goto fail;
 	}
 	fileRead(pFileMod, pMod->pPatterns, pMod->ulPatternsSize);
+	{
+		ULONG ulOffs;
+		for(ulOffs = 0; ulOffs + 3 < pMod->ulPatternsSize; ulOffs += 4) {
+			tModVoice *pVoice = (tModVoice *)&pMod->pPatterns[ulOffs];
+			pVoice->uwNote = endianBig16(pVoice->uwNote);
+			pVoice->uwCmd = endianBig16(pVoice->uwCmd);
+		}
+	}
 
 	// Read sample data
 	ULONG ulSampleStartPos = fileGetPos(pFileMod);
@@ -2954,13 +2981,16 @@ tPtplayerSfx *ptplayerSfxCreateFromFd(tFile *pFileSfx, UBYTE isFast)
 	fileRead(pFileSfx, &ubVersion, sizeof(ubVersion));
 	if(ubVersion == 2) {
 		fileRead(pFileSfx, &pSfx->uwWordLength, sizeof(pSfx->uwWordLength));
+		pSfx->uwWordLength = endianBig16(pSfx->uwWordLength);
 		ULONG ulByteSize = pSfx->uwWordLength * sizeof(UWORD);
 
 		UWORD uwSampleRateHz;
 		fileRead(pFileSfx, &uwSampleRateHz, sizeof(uwSampleRateHz));
+		uwSampleRateHz = endianBig16(uwSampleRateHz);
 		pSfx->uwPeriod = (getClockConstant() + uwSampleRateHz/2) / uwSampleRateHz;
 		ULONG ulCompressedSize;
 		fileRead(pFileSfx, &ulCompressedSize, sizeof(ulCompressedSize));
+		ulCompressedSize = endianBig32(ulCompressedSize);
 		logWrite(
 			"Length: %lu, compressed: %lu, sample rate: %hu, period: %hu\n",
 			ulByteSize, ulCompressedSize, uwSampleRateHz, pSfx->uwPeriod
@@ -3315,6 +3345,8 @@ tPtplayerSamplePack *ptplayerSampleDataCreateFromFd(tFile *pFileSamples)
 		ULONG ulCompressedLength;
 		fileRead(pFileSamples, &pSample->uwWordLength, sizeof(pSample->uwWordLength));
 		fileRead(pFileSamples, &ulCompressedLength, sizeof(ulCompressedLength));
+		pSample->uwWordLength = endianBig16(pSample->uwWordLength);
+		ulCompressedLength = endianBig32(ulCompressedLength);
 		pSample->pData = memAllocChip(pSample->uwWordLength * sizeof(UWORD));
 		if(!pSample->pData) {
 			goto fail;

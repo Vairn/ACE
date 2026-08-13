@@ -279,6 +279,8 @@ void bitmapLoadFromFd(
 	fileRead(pFile, &ubSrcBpp, sizeof(UBYTE));
 	fileRead(pFile, &ubSrcVersion, sizeof(UBYTE));
 	fileRead(pFile, &ubSrcFlags, sizeof(UBYTE));
+	uwSrcWidth = endianBig16(uwSrcWidth);
+	uwSrcHeight = endianBig16(uwSrcHeight);
 	fileSeek(pFile, 2 * sizeof(UBYTE), FILE_SEEK_CURRENT); // Skip unused 2 bytes
 	if(ubSrcVersion != 0) {
 		fileClose(pFile);
@@ -397,6 +399,8 @@ tBitMap *bitmapCreateFromFd(tFile *pFile, UBYTE isFast) {
 	fileRead(pFile, &ubPlaneCount, sizeof(UBYTE));
 	fileRead(pFile, &ubVersion, sizeof(UBYTE));
 	fileRead(pFile, &ubFlags, sizeof(UBYTE));
+	uwWidth = endianBig16(uwWidth);
+	uwHeight = endianBig16(uwHeight);
 	fileSeek(pFile, 2 * sizeof(UBYTE), SEEK_CUR); // Skip unused 2 bytes
 	if(ubVersion != 0) {
 		logWrite("ERR: Unknown file version: %hu\n", ubVersion);

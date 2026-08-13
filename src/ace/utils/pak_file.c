@@ -5,6 +5,7 @@
 #include <ace/utils/pak_file.h>
 #include <string.h>
 #include <ace/utils/disk_file.h>
+#include <ace/utils/endian.h>
 #include <ace/managers/memory.h>
 #include <ace/managers/log.h>
 
@@ -417,12 +418,17 @@ tPakFile *pakFileOpen(const char *szPath, UBYTE isUninterrupted) {
 	pPakFile->pFile = pMainFile;
 	pPakFile->pPrevReadSubfile = 0;
 	fileRead(pMainFile, &pPakFile->uwFileCount, sizeof(pPakFile->uwFileCount));
+	pPakFile->uwFileCount = endianBig16(pPakFile->uwFileCount);
 	pPakFile->pEntries = memAllocFast(sizeof(pPakFile->pEntries[0]) * pPakFile->uwFileCount);
 	for(UWORD i = 0; i < pPakFile->uwFileCount; ++i) {
 		fileRead(pMainFile, &pPakFile->pEntries[i].ulPathChecksum, sizeof(pPakFile->pEntries[i].ulPathChecksum));
 		fileRead(pMainFile, &pPakFile->pEntries[i].ulOffs, sizeof(pPakFile->pEntries[i].ulOffs));
 		fileRead(pMainFile, &pPakFile->pEntries[i].ulSizeUncompressed, sizeof(pPakFile->pEntries[i].ulSizeUncompressed));
 		fileRead(pMainFile, &pPakFile->pEntries[i].ulSizeData, sizeof(pPakFile->pEntries[i].ulSizeData));
+		pPakFile->pEntries[i].ulPathChecksum = endianBig32(pPakFile->pEntries[i].ulPathChecksum);
+		pPakFile->pEntries[i].ulOffs = endianBig32(pPakFile->pEntries[i].ulOffs);
+		pPakFile->pEntries[i].ulSizeUncompressed = endianBig32(pPakFile->pEntries[i].ulSizeUncompressed);
+		pPakFile->pEntries[i].ulSizeData = endianBig32(pPakFile->pEntries[i].ulSizeData);
 	}
 	logWrite("Pak file: %p, file count: %hu\n", pPakFile, pPakFile->uwFileCount);
 

@@ -17,10 +17,18 @@ set(ACE_SCROLLBUFFER_X_MARGIN_SIZE 1 CACHE STRING "Scroll/tilebuffer: Number of 
 set(ACE_SCROLLBUFFER_Y_MARGIN_SIZE 1 CACHE STRING "Scroll/tilebuffer: Number of tiles comprising into offscreen margins in X direction. Bigger allows drawing in bigger objects than tile size.")
 set(ACE_FILE_USE_ONLY_DISK OFF CACHE BOOL "If enabled, only diskFile functions will be available for file access.")
 
+option(ACE_HOST "Build ACE with the host SDL chipset backend (Windows/Linux), not Amiga." OFF)
+set(ACE_HOST_MACHINE "" CACHE STRING "Host machine preset: A500, A500_512_512, A500_1MB, A600, A1200, A1200_4MB, A1200_8MB, A4000, CUSTOM")
+set(ACE_HOST_MEM_MODE "STRICT" CACHE STRING "Host memory mode: STRICT or VIRTUAL")
+set(ACE_HOST_CHIP_SIZE 0 CACHE STRING "CUSTOM machine CHIP size in bytes")
+set(ACE_HOST_FAST_SIZE 0 CACHE STRING "CUSTOM machine FAST size in bytes")
+option(ACE_HOST_DEBUG "Host debug HUD (F11/F12)" ON)
+
 message(STATUS "[ACE] ACE_LIBRARY_KIND: '${ACE_LIBRARY_KIND}'")
 message(STATUS "[ACE] ACE_DEBUG: '${ACE_DEBUG}'")
 message(STATUS "[ACE] ACE_DEBUG_UAE: '${ACE_DEBUG_UAE}'")
 message(STATUS "[ACE] ACE_DEBUG_SERIAL: '${ACE_DEBUG_SERIAL}'")
+message(STATUS "[ACE] ACE_HOST: '${ACE_HOST}'")
 message(STATUS "[ACE] ACE_BOB_WRAP_Y: '${ACE_BOB_WRAP_Y}'")
 message(STATUS "[ACE] ACE_BOB_PRISTINE_BUFFER: '${ACE_BOB_PRISTINE_BUFFER}'")
 message(STATUS "[ACE] ACE_BOB_ALWAYS_ON_SCROLL_BUFFER: '${ACE_BOB_ALWAYS_ON_SCROLL_BUFFER}'")

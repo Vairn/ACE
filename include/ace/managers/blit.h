@@ -25,6 +25,7 @@ extern "C" {
 #include <exec/interrupts.h>  // struct Interrupt
 #include <hardware/dmabits.h> // DMAF_BLITTER
 #include <hardware/intbits.h> // INTB_BLIT
+#include <hardware/blit.h>
 #endif // AMIGA
 
 #include <ace/types.h>

@@ -27,11 +27,11 @@ extern "C" {
  *  @see endianLittle32()
  */
 static inline UWORD endianLittle16(UWORD uwIn) {
-#ifdef AMIGA
+#if defined(AMIGA) && !defined(ACE_HOST)
 	return (uwIn << 8) | (uwIn >> 8);
 #else
 	return uwIn;
-#endif // AMIGA
+#endif
 }
 
 /**
@@ -46,11 +46,11 @@ static inline UWORD endianLittle16(UWORD uwIn) {
  *  @see endianLittle16()
  */
 static inline UWORD endianBig16(UWORD uwIn) {
-#ifdef AMIGA
+#if defined(AMIGA) && !defined(ACE_HOST)
 	return uwIn;
 #else
 	return (uwIn << 8) | (uwIn >> 8);
-#endif // AMIGA
+#endif
 }
 
 /**
@@ -62,11 +62,11 @@ static inline UWORD endianBig16(UWORD uwIn) {
  *  @see endianLittle16()
  */
 static inline ULONG endianLittle32(ULONG ulIn) {
-#ifdef AMIGA
+#if defined(AMIGA) && !defined(ACE_HOST)
 	return (ulIn << 24) | ((ulIn & 0xFF00) << 8) | ((ulIn & 0xFF0000) >> 8) | (ulIn >> 24);
 #else
 	return ulIn;
-#endif // AMIGA
+#endif
 }
 
 /**
@@ -81,11 +81,11 @@ static inline ULONG endianLittle32(ULONG ulIn) {
  *  @see endianLittle32()
  */
 static inline ULONG endianBig32(ULONG ulIn) {
-#ifdef AMIGA
+#if defined(AMIGA) && !defined(ACE_HOST)
 	return ulIn;
 #else
 	return (ulIn << 24) | ((ulIn & 0xFF00) << 8) | ((ulIn & 0xFF0000) >> 8) | (ulIn >> 24);
-#endif // AMIGA
+#endif
 }
 
 #ifdef __cplusplus

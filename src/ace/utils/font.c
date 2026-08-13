@@ -7,6 +7,7 @@
 #include <ace/managers/system.h>
 #include <ace/utils/font.h>
 #include <ace/utils/disk_file.h>
+#include <ace/utils/endian.h>
 
 /* Globals */
 
@@ -44,6 +45,8 @@ tFont *fontCreateFromFd(tFile *pFontFile) {
 	fileRead(pFontFile, &pFont->uwWidth, sizeof(UWORD));
 	fileRead(pFontFile, &pFont->uwHeight, sizeof(UWORD));
 	fileRead(pFontFile, &pFont->ubChars, sizeof(UBYTE));
+	pFont->uwWidth = endianBig16(pFont->uwWidth);
+	pFont->uwHeight = endianBig16(pFont->uwHeight);
 	logWrite(
 		"Addr: %p, data width: %upx, chars: %u, font height: %upx\n",
 		pFont, pFont->uwWidth, pFont->ubChars, pFont->uwHeight
@@ -51,6 +54,12 @@ tFont *fontCreateFromFd(tFile *pFontFile) {
 
 	pFont->pCharOffsets = memAllocFast(sizeof(UWORD) * pFont->ubChars);
 	fileRead(pFontFile, pFont->pCharOffsets, sizeof(UWORD) * pFont->ubChars);
+	{
+		UBYTE i;
+		for(i = 0; i < pFont->ubChars; ++i) {
+			pFont->pCharOffsets[i] = endianBig16(pFont->pCharOffsets[i]);
+		}
+	}
 
 	pFont->pRawData = bitmapCreate(pFont->uwWidth, pFont->uwHeight, 1, 0);
 #ifdef AMIGA

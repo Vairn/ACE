@@ -4,6 +4,9 @@
 
 #include <ace/managers/blit.h>
 #include <ace/managers/system.h>
+#ifdef ACE_HOST
+#include <ace_host/chipset.h>
+#endif
 
 void blitManagerCreate(void) {
 	logBlockBegin("blitManagerCreate");
@@ -101,13 +104,20 @@ UBYTE _blitCheck(
 #endif // defined(ACE_DEBUG)
 
 void blitWait(void) {
+#ifdef ACE_HOST
+	chipsetWaitBlit();
+#else
 	// A1000 Blitter done bug:
 	// The solution is to read hardware register before testing the bit.
 	(void)g_pCustom->dmaconr;
 	while(g_pCustom->dmaconr & DMAF_BLTDONE) continue;
+#endif
 }
 
 UBYTE blitIsIdle(void) {
+#ifdef ACE_HOST
+	return (UBYTE)!chipsetBlitIsBusy();
+#else
 	// A1000 Blitter done bug:
 	// The solution is to read hardware register before testing the bit.
 	(void)g_pCustom->dmaconr;
@@ -115,6 +125,7 @@ UBYTE blitIsIdle(void) {
 		return 0;
 	}
 	return 1;
+#endif
 }
 
 UBYTE blitUnsafeCopy(

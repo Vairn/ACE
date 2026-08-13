@@ -5,6 +5,9 @@ project(ACE
 	HOMEPAGE_URL "https://github.com/AmigaPorts/ACE"
 )
 
+# Host SDL chipset backend (must be set before the AMIGA guard)
+option(ACE_HOST "Build ACE with the host SDL chipset backend (Windows/Linux), not Amiga." OFF)
+
 # TODO: replace with PROJECT_IS_TOP_LEVEL with cmake 3.21+
 get_directory_property(hasParent PARENT_DIRECTORY)
 if(hasParent)
@@ -26,11 +29,14 @@ set(VER_Y 0)
 set(VER_Z 1)
 set(VER_FULL "${VER_X}.${VER_Y}.${VER_Z}")
 
-if(NOT AMIGA)
-	message(SEND_ERROR "[ACE] This project only compiles for Amiga")
+if(NOT AMIGA AND NOT ACE_HOST)
+	message(SEND_ERROR "[ACE] This project only compiles for Amiga (or ACE_HOST=ON)")
 endif()
 
 file(GLOB_RECURSE SOURCES src/ace/*.c src/fixmath/*.c)
+if(ACE_HOST)
+	list(FILTER SOURCES EXCLUDE REGEX ".*/system\\.c$")
+endif()
 file(GLOB HEADERS_ACE include/ace/*.h)
 file(GLOB HEADERS_ACE_GENERIC include/ace/generic/*.h)
 file(GLOB HEADERS_ACE_UTILS include/ace/utils/*.h)
@@ -52,8 +58,18 @@ add_library(${TARGET_NAME} ${ACE_LIBRARY_KIND} ${SOURCES} ${HEADERS})
 
 set(CMAKE_C_STANDARD 11)
 target_compile_definitions(${TARGET_NAME} PUBLIC AMIGA)
-target_compile_options(${TARGET_NAME} PRIVATE $<$<OR:$<COMPILE_LANGUAGE:CXX>,$<COMPILE_LANGUAGE:C>>:-Wall -Wextra>)
-target_compile_options(${TARGET_NAME} PUBLIC $<$<OR:$<COMPILE_LANGUAGE:CXX>,$<COMPILE_LANGUAGE:C>>:-fomit-frame-pointer>)
+if(ACE_HOST)
+	target_compile_definitions(${TARGET_NAME} PUBLIC ACE_HOST)
+	if(MSVC)
+		target_compile_options(${TARGET_NAME} PRIVATE /W3 /wd4244 /wd4267 /wd4311 /wd4312 /wd4047 /wd4028)
+		target_compile_definitions(${TARGET_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
+	else()
+		target_compile_options(${TARGET_NAME} PRIVATE -Wall -Wextra -Wno-int-conversion -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter)
+	endif()
+else()
+	target_compile_options(${TARGET_NAME} PRIVATE $<$<OR:$<COMPILE_LANGUAGE:CXX>,$<COMPILE_LANGUAGE:C>>:-Wall -Wextra>)
+	target_compile_options(${TARGET_NAME} PUBLIC $<$<OR:$<COMPILE_LANGUAGE:CXX>,$<COMPILE_LANGUAGE:C>>:-fomit-frame-pointer>)
+endif()
 
 if(ACE_DEBUG)
 	target_compile_definitions(${TARGET_NAME} PUBLIC ACE_DEBUG)
@@ -98,24 +114,118 @@ if(ACE_USE_AGA_FEATURES)
 	target_compile_definitions(${TARGET_NAME} PUBLIC ACE_USE_ECS_FEATURES ACE_USE_AGA_FEATURES)
 endif()
 
-if(M68K_COMPILER MATCHES "Bartman")
-	include(cmake/CPM.cmake)
-	CPMAddPackage(
-		NAME bartman_gcc_support
-		GITHUB_REPOSITORY AmigaPorts/bartman_gcc_support
-		GIT_TAG latest
-	)
-	# Workaround for nested OBJECT library
-	# https://stackoverflow.com/questions/71040175
-	target_link_libraries(${TARGET_NAME} PUBLIC bartman_gcc_support "$<TARGET_OBJECTS:bartman_gcc_support>")
+if(NOT ACE_HOST)
+	if(M68K_COMPILER MATCHES "Bartman")
+		include(cmake/CPM.cmake)
+		CPMAddPackage(
+			NAME bartman_gcc_support
+			GITHUB_REPOSITORY AmigaPorts/bartman_gcc_support
+			GIT_TAG latest
+		)
+		# Workaround for nested OBJECT library
+		# https://stackoverflow.com/questions/71040175
+		target_link_libraries(${TARGET_NAME} PUBLIC bartman_gcc_support "$<TARGET_OBJECTS:bartman_gcc_support>")
+	endif()
+	if(M68K_COMPILER MATCHES "Bartman" OR USE_MINI_STD)
+		target_include_directories(${TARGET_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/include/mini_std)
+		file(GLOB SOURCES_MINI_STD src/mini_std/*.c)
+		file(GLOB HEADERS_MINI_STD include/mini_std/*.h)
+		target_compile_definitions(${TARGET_NAME} PRIVATE PRINTF_DISABLE_SUPPORT_FLOAT PRINTF_DISABLE_SUPPORT_LONG_LONG)
+		target_sources(${TARGET_NAME} PRIVATE ${SOURCES_MINI_STD} ${HEADERS_MINI_STD})
+		message(STATUS "[ACE] Using mini std")
+	endif()
 endif()
-if(M68K_COMPILER MATCHES "Bartman" OR USE_MINI_STD)
-	target_include_directories(${TARGET_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/include/mini_std)
-	file(GLOB SOURCES_MINI_STD src/mini_std/*.c)
-	file(GLOB HEADERS_MINI_STD include/mini_std/*.h)
-	target_compile_definitions(${TARGET_NAME} PRIVATE PRINTF_DISABLE_SUPPORT_FLOAT PRINTF_DISABLE_SUPPORT_LONG_LONG)
-	target_sources(${TARGET_NAME} PRIVATE ${SOURCES_MINI_STD} ${HEADERS_MINI_STD})
-	message(STATUS "[ACE] Using mini std")
+
+if(ACE_HOST)
+	# Default machine: A500 512/512 OCS; A1200 when AGA is on and user did not pick one.
+	if(ACE_HOST_MACHINE STREQUAL "")
+		if(ACE_USE_AGA_FEATURES)
+			set(ACE_HOST_MACHINE "A1200")
+		else()
+			set(ACE_HOST_MACHINE "A500_512_512")
+		endif()
+	endif()
+	string(TOUPPER "${ACE_HOST_MACHINE}" ACE_HOST_MACHINE_U)
+	if(ACE_HOST_MACHINE_U STREQUAL "A500")
+		set(_ACE_HOST_MACHINE_ENUM 0)
+	elseif(ACE_HOST_MACHINE_U STREQUAL "A500_512_512")
+		set(_ACE_HOST_MACHINE_ENUM 1)
+	elseif(ACE_HOST_MACHINE_U STREQUAL "A500_1MB")
+		set(_ACE_HOST_MACHINE_ENUM 2)
+	elseif(ACE_HOST_MACHINE_U STREQUAL "A600")
+		set(_ACE_HOST_MACHINE_ENUM 3)
+	elseif(ACE_HOST_MACHINE_U STREQUAL "A1200")
+		set(_ACE_HOST_MACHINE_ENUM 4)
+	elseif(ACE_HOST_MACHINE_U STREQUAL "A1200_4MB")
+		set(_ACE_HOST_MACHINE_ENUM 5)
+	elseif(ACE_HOST_MACHINE_U STREQUAL "A1200_8MB")
+		set(_ACE_HOST_MACHINE_ENUM 6)
+	elseif(ACE_HOST_MACHINE_U STREQUAL "A4000")
+		set(_ACE_HOST_MACHINE_ENUM 7)
+	else()
+		set(_ACE_HOST_MACHINE_ENUM 8)
+	endif()
+	string(TOUPPER "${ACE_HOST_MEM_MODE}" ACE_HOST_MEM_MODE_U)
+	if(ACE_HOST_MEM_MODE_U STREQUAL "VIRTUAL")
+		set(_ACE_HOST_MEM_MODE_ENUM 1)
+	else()
+		set(_ACE_HOST_MEM_MODE_ENUM 0)
+	endif()
+
+	target_compile_definitions(${TARGET_NAME} PRIVATE
+		ACE_HOST_MACHINE_ENUM=${_ACE_HOST_MACHINE_ENUM}
+		ACE_HOST_MEM_MODE_ENUM=${_ACE_HOST_MEM_MODE_ENUM}
+		ACE_HOST_CHIP_SIZE=${ACE_HOST_CHIP_SIZE}
+		ACE_HOST_FAST_SIZE=${ACE_HOST_FAST_SIZE}
+	)
+	if(ACE_HOST_DEBUG)
+		target_compile_definitions(${TARGET_NAME} PUBLIC ACE_HOST_DEBUG)
+	endif()
+
+	target_sources(${TARGET_NAME} PRIVATE
+		host/chipset/host_os.c
+		host/chipset/memory.c
+		host/chipset/chipset.c
+		host/chipset/blitter.c
+		host/chipset/cia.c
+		host/chipset/paula.c
+		host/system_host.c
+		host/sdl/sdl_host.c
+		host/debug/hud.c
+	)
+	target_include_directories(${TARGET_NAME} PUBLIC
+		${PROJECT_SOURCE_DIR}/host/include
+	)
+	target_include_directories(${TARGET_NAME} PRIVATE
+		${PROJECT_SOURCE_DIR}/host/chipset
+	)
+
+	find_package(SDL2 QUIET)
+	if(NOT SDL2_FOUND)
+		include(FetchContent)
+		set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+		set(SDL_STATIC ON CACHE BOOL "" FORCE)
+		set(SDL_TEST OFF CACHE BOOL "" FORCE)
+		FetchContent_Declare(SDL2
+			GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+			GIT_TAG release-2.30.8
+			GIT_SHALLOW TRUE
+		)
+		FetchContent_MakeAvailable(SDL2)
+	endif()
+	if(TARGET SDL2::SDL2)
+		target_link_libraries(${TARGET_NAME} PUBLIC SDL2::SDL2)
+		target_compile_definitions(${TARGET_NAME} PRIVATE ACE_HOST_HAS_SDL)
+	elseif(TARGET SDL2::SDL2-static)
+		target_link_libraries(${TARGET_NAME} PUBLIC SDL2::SDL2-static)
+		target_compile_definitions(${TARGET_NAME} PRIVATE ACE_HOST_HAS_SDL)
+	elseif(TARGET SDL2-static)
+		target_link_libraries(${TARGET_NAME} PUBLIC SDL2-static)
+		target_compile_definitions(${TARGET_NAME} PRIVATE ACE_HOST_HAS_SDL)
+	else()
+		message(WARNING "[ACE] SDL2 not found — host library builds without video/audio. Install SDL2 or allow FetchContent.")
+	endif()
+	message(STATUS "[ACE] ACE_HOST machine=${ACE_HOST_MACHINE} mem=${ACE_HOST_MEM_MODE}")
 endif()
 
 target_include_directories(${TARGET_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/include)

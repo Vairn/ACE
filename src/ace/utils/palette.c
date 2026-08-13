@@ -53,10 +53,19 @@ void paletteLoadFromFd(tFile *pFile, UWORD *pPalette, UWORD uwMaxLength) {
 	);
 
 	if(ubFirst == PLT_V2_ECS) {
+		UWORD i;
 		fileRead(pFile, pPalette, sizeof(UWORD) * uwColorsRead);
+		for(i = 0; i < uwColorsRead; ++i) {
+			pPalette[i] = endianBig16(pPalette[i]);
+		}
 	}
 	else {
+		ULONG i;
+		ULONG *pAga = (ULONG *)pPalette;
 		fileRead(pFile, pPalette, sizeof(ULONG) * uwColorsRead);
+		for(i = 0; i < uwColorsRead; ++i) {
+			pAga[i] = endianBig32(pAga[i]);
+		}
 	}
 
 	fileClose(pFile);
@@ -88,7 +97,13 @@ void paletteSaveOcs(const UWORD *pPalette, UWORD uwColorCnt, char *szPath) {
 		UWORD uwWire = endianBig16(uwColorCnt);
 		fileWrite(pFile, &uwWire, sizeof(UWORD));
 	}
-	fileWrite(pFile, pPalette, sizeof(UWORD) * uwColorCnt);
+	{
+		UWORD i;
+		for(i = 0; i < uwColorCnt; ++i) {
+			UWORD uwWire = endianBig16(pPalette[i]);
+			fileWrite(pFile, &uwWire, sizeof(UWORD));
+		}
+	}
 	fileClose(pFile);
 
 	logBlockEnd("paletteSaveOcs()");

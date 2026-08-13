@@ -61,6 +61,34 @@ typedef int32_t LONG;
 #define LIKELY(x) x
 #define UNLIKELY(x) x
 #define BITFIELD_STRUCT struct __attribute__((packed))
+#elif defined(ACE_HOST)
+#define INTERRUPT
+#define INTERRUPT_END do {} while(0)
+#define HWINTERRUPT
+#define UNUSED_ARG
+#define REGARG(arg, reg) arg
+#define CHIP
+#define CHIP_DATA
+#define CHIP_CODE
+#define CHIP_BSS
+#define FAR
+#ifdef _MSC_VER
+#define ALWAYS_INLINE __forceinline
+#define FN_HOTSPOT
+#define FN_COLDSPOT
+#define LIKELY(x) x
+#define UNLIKELY(x) x
+#ifndef __attribute__
+#define __attribute__(x)
+#endif
+#else
+#define ALWAYS_INLINE inline
+#define FN_HOTSPOT
+#define FN_COLDSPOT
+#define LIKELY(x) __builtin_expect(!!(x), 1)
+#define UNLIKELY(x) __builtin_expect(!!(x), 0)
+#endif
+#define BITFIELD_STRUCT struct __attribute__((packed))
 #elif defined(BARTMAN_GCC)
 #define INTERRUPT
 #define INTERRUPT_END do {} while(0)
