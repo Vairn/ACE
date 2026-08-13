@@ -251,7 +251,6 @@ void systemCreate(void) {
 	s_uwAceDmaCon = 0;
 	g_pCustom->dmacon = DMAF_SETCLR | DMAF_MASTER;
 	chipsetSyncCpuWrites();
-	/* Amiga systemCreate() starts with OS owning the blitter, then takes it. */
 	systemGetBlitterFromOs();
 }
 
@@ -365,33 +364,26 @@ void aceHostDispatchInts(UWORD uwPending) {
 	int i;
 	UWORD ena = g_pCustom->intenar;
 	UWORD handled = 0;
-	if(!(ena & INTF_INTEN)) {
-		return;
-	}
-	if((uwPending & INTF_VERTB) && (ena & INTF_VERTB)) {
+	/* Frame counter must advance on every simulated vblank. Host INTENA
+	 * often has only INTF_INTEN (systemUnuse does not enable VERTB), and
+	 * ptplayer may briefly clear INTF_INTEN — either would freeze anything
+	 * waiting on timerGet(). */
+	if(uwPending & INTF_VERTB) {
 		timerOnInterrupt();
 		handled |= INTF_VERTB;
 	}
-	for(i = 0; i < 14; ++i) {
-		UWORD bit = (UWORD)(1u << i);
-		if((uwPending & bit) && (ena & bit) && s_pAceInterrupts[i].pHandler) {
-			s_pAceInterrupts[i].pHandler(g_pCustom, s_pAceInterrupts[i].pData);
-			handled |= bit;
+	if(ena & INTF_INTEN) {
+		for(i = 0; i < 14; ++i) {
+			UWORD bit = (UWORD)(1u << i);
+			if((uwPending & bit) && (ena & bit) && s_pAceInterrupts[i].pHandler) {
+				s_pAceInterrupts[i].pHandler(g_pCustom, s_pAceInterrupts[i].pData);
+				handled |= bit;
+			}
 		}
 	}
 	if(handled) {
-		/* The native level handlers acknowledge requests after callbacks. */
 		g_pCustom->intreq = handled;
 		chipsetSyncCpuWrites();
-	}
-	/* CIA-B timer A/B → EXTER */
-	if((uwPending & INTF_EXTER) || 1) {
-		int b;
-		for(b = 0; b < 5; ++b) {
-			if(s_pAceCiaInterrupts[CIA_B][b].pHandler) {
-				/* Fired from CIA underflow via dedicated path below. */
-			}
-		}
 	}
 }
 

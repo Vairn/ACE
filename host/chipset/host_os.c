@@ -210,15 +210,7 @@ void *hostOsHeapMalloc(size_t n) {
 }
 
 void *hostOsHeapCalloc(size_t nmemb, size_t size) {
-	size_t n;
-	if(size && nmemb > ((size_t)-1) / size) {
-		return 0;
-	}
-	n = nmemb * size;
-	if(!n) {
-		n = 1;
-	}
-	return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, n);
+	return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, nmemb * size);
 }
 
 void *hostOsHeapRealloc(void *p, size_t n) {

@@ -88,7 +88,9 @@ static void spanFreeList(tSpan **pp) {
 
 static void insertFreeSorted(tPool *pPool, tSpan *pNew) {
 	tSpan **pp = &pPool->pFree;
+	tSpan *pPrev = 0;
 	while(*pp && (*pp)->ulOffs < pNew->ulOffs) {
+		pPrev = *pp;
 		pp = &(*pp)->pNext;
 	}
 	pNew->pNext = *pp;
@@ -99,16 +101,10 @@ static void insertFreeSorted(tPool *pPool, tSpan *pNew) {
 		pNew->pNext = pN->pNext;
 		spanRelease(pN);
 	}
-	if(pp != &pPool->pFree) {
-		tSpan *pPrev = pPool->pFree;
-		while(pPrev->pNext != pNew) {
-			pPrev = pPrev->pNext;
-		}
-		if(pPrev->ulOffs + pPrev->ulSize == pNew->ulOffs) {
-			pPrev->ulSize += pNew->ulSize;
-			pPrev->pNext = pNew->pNext;
-			spanRelease(pNew);
-		}
+	if(pPrev && pPrev->ulOffs + pPrev->ulSize == pNew->ulOffs) {
+		pPrev->ulSize += pNew->ulSize;
+		pPrev->pNext = pNew->pNext;
+		spanRelease(pNew);
 	}
 }
 
@@ -120,14 +116,6 @@ static ULONG largestFree(const tPool *pPool) {
 		}
 	}
 	return ulBest;
-}
-
-static void *mapLow(size_t size) {
-	return hostOsMapLow(size);
-}
-
-static void unmapLow(void *p, size_t size) {
-	hostOsUnmapLow(p, size);
 }
 
 static void poolInit(tPool *pPool, UBYTE *pBase, ULONG ulSize, ULONG ulBudget, int isChip, int isDma) {
@@ -313,7 +301,7 @@ void aceHostMemInit(
 			break;
 	}
 
-	s_pBus = (UBYTE *)mapLow(ACE_HOST_BUS_SIZE);
+	s_pBus = (UBYTE *)hostOsMapLow(ACE_HOST_BUS_SIZE);
 	if(!s_pBus) {
 		fprintf(stderr, "[ACE_HOST] ERR: failed to map 16MiB chip bus\n");
 		exit(1);
@@ -338,7 +326,7 @@ void aceHostMemInit(
 			s_sFast.ulMapped = ulFast;
 		}
 		else {
-			void *pFast = mapLow(ulFastMap);
+			void *pFast = hostOsMapLow(ulFastMap);
 			if(!pFast) {
 				fprintf(stderr, "[ACE_HOST] ERR: FAST pool mapping failed\n");
 				exit(1);
@@ -373,9 +361,9 @@ void aceHostMemShutdown(void) {
 	spanFreeList(&s_sFast.pFree);
 	spanFreeList(&s_sFast.pAlloc);
 	if(s_sFast.pBase && (s_sFast.pBase < s_pBus || s_sFast.pBase >= s_pBus + ACE_HOST_BUS_SIZE)) {
-		unmapLow(s_sFast.pBase, s_sFast.ulSize);
+		hostOsUnmapLow(s_sFast.pBase, s_sFast.ulSize);
 	}
-	unmapLow(s_pBus, ACE_HOST_BUS_SIZE);
+	hostOsUnmapLow(s_pBus, ACE_HOST_BUS_SIZE);
 	s_pBus = 0;
 }
 

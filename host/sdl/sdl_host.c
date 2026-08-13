@@ -366,11 +366,9 @@ void aceHostSdlPump(void) {
 		}
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 		else if(e.type == SDL_CONTROLLERDEVICEADDED) {
-			/* ADDED.which is a device index. */
 			openPadAt(e.cdevice.which);
 		}
 		else if(e.type == SDL_CONTROLLERDEVICEREMOVED) {
-			/* REMOVED.which is a joystick instance id. */
 			if(padInstanceId() == (SDL_JoystickID)e.cdevice.which) {
 				fprintf(stderr, "[ACE_HOST] gamepad disconnected\n");
 				closePad();

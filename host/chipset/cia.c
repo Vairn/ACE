@@ -124,8 +124,6 @@ void ciaPollKbd(void) {
 	if(!s_cia[0]) {
 		return;
 	}
-	/* Handshake: ACE key.c sets SPMODE, waits 3 scanlines via getRayPos(),
-	 * then clears SPMODE. Do not inject the next SDR byte until then. */
 	if(s_kbdBusy) {
 		if(s_cia[0]->cra & CIACRA_SPMODE) {
 			return;
@@ -137,7 +135,6 @@ void ciaPollKbd(void) {
 	}
 	raw = s_kbdQ[s_kbdH];
 	s_kbdH = (s_kbdH + 1) % KBD_Q;
-	/* key.c: ubKeyCode = ~sdr; released = bit0; code >>= 1 */
 	ser = (UBYTE)(((raw & 0x7F) << 1) | ((raw & 0x80) ? 1 : 0));
 	s_cia[0]->sdr = (UBYTE)~ser;
 	s_icrData[0] |= CIAICRF_SERIAL;

@@ -136,11 +136,22 @@ static void pushSample(int16_t l, int16_t r) {
 
 static int chanSample(int i) {
 	int v = s_ch[i].vol > 64 ? 64 : (int)s_ch[i].vol;
+	int s;
 	if(!s_ch[i].hasCurrent) {
 		return 0;
 	}
-	int s = s_ch[i].samp[s_ch[i].sampIdx & 1];
+	s = s_ch[i].samp[s_ch[i].sampIdx & 1];
 	return s * v;
+}
+
+static int sat16(int v) {
+	if(v > 32767) {
+		return 32767;
+	}
+	if(v < -32768) {
+		return -32768;
+	}
+	return v;
 }
 
 void paulaMix(short *pOut, int nFrames) {
@@ -153,24 +164,11 @@ void paulaMix(short *pOut, int nFrames) {
 			s_rTail = (s_rTail + 1) % RING;
 		}
 		else {
-			/* 1+2 left, 0+3 right */
 			l = chanSample(1) + chanSample(2);
 			r = chanSample(0) + chanSample(3);
 		}
-		if(l > 32767) {
-			l = 32767;
-		}
-		if(l < -32768) {
-			l = -32768;
-		}
-		if(r > 32767) {
-			r = 32767;
-		}
-		if(r < -32768) {
-			r = -32768;
-		}
-		pOut[f * 2] = (short)l;
-		pOut[f * 2 + 1] = (short)r;
+		pOut[f * 2] = (short)sat16(l);
+		pOut[f * 2 + 1] = (short)sat16(r);
 	}
 }
 
@@ -219,18 +217,6 @@ void paulaLineTick(int lineRate, ULONG paulaClock) {
 		for(i = 0; i < 4; ++i) {
 			advanceChannel(&s_ch[i], paulaClock);
 		}
-		if(l > 32767) {
-			l = 32767;
-		}
-		if(l < -32768) {
-			l = -32768;
-		}
-		if(r > 32767) {
-			r = 32767;
-		}
-		if(r < -32768) {
-			r = -32768;
-		}
-		pushSample((int16_t)l, (int16_t)r);
+		pushSample((int16_t)sat16(l), (int16_t)sat16(r));
 	}
 }

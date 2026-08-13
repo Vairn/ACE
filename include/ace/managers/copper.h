@@ -301,10 +301,6 @@ static inline void copSetMoveVal(tCopMoveCmd *pMoveCmd, UWORD uwValue) {
 }
 #endif
 
-/**
- * @brief Set SKIP vs WAIT on an existing wait/skip instruction (second-word bit 0).
- * Host copper lists are stored as big-endian Agnus words; do not poke bitfields.
- */
 static inline void copSetSkipBit(tCopWaitCmd *pWaitCmd, UBYTE isSkip) {
 #ifdef ACE_HOST
 	UBYTE *b = (UBYTE *)pWaitCmd;
@@ -319,9 +315,6 @@ static inline void copSetSkipBit(tCopWaitCmd *pWaitCmd, UBYTE isSkip) {
 #endif
 }
 
-/**
- * @brief Update only the WAIT/SKIP Y compare (high byte of the first word).
- */
 static inline void copSetWaitY(tCopWaitCmd *pWaitCmd, UBYTE ubY) {
 #ifdef ACE_HOST
 	((UBYTE *)pWaitCmd)[0] = ubY;

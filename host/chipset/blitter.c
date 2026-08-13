@@ -5,65 +5,83 @@
 
 static int s_busy;
 static int s_slotsLeft;
-static int s_lineMode;
 
-static ULONG ptrOf(APTR a) {
-	ULONG p = aceHostIsChipAddr((ULONG)a)
-		? (ULONG)(uintptr_t)aceHostBusToPtr((ULONG)a)
-		: (ULONG)a;
-	return p & ~(ULONG)1;
+static LONG chipAddr(APTR a) {
+	ULONG p = (ULONG)(uintptr_t)a;
+	if(aceHostIsChipAddr(p)) {
+		p = (ULONG)(uintptr_t)aceHostBusToPtr(p);
+	}
+	return (LONG)(p & ~1ul);
 }
 
-static UWORD r16(ULONG p) {
+static UWORD r16(LONG p) {
 	const UBYTE *b;
 	if(!p) {
 		return 0;
 	}
-	b = (const UBYTE *)(uintptr_t)p;
+	b = (const UBYTE *)(uintptr_t)(ULONG)p;
 	return (UWORD)((b[0] << 8) | b[1]);
 }
 
-static void w16(ULONG p, UWORD v) {
+static void w16(LONG p, UWORD v) {
 	UBYTE *b;
 	if(!p) {
 		return;
 	}
-	b = (UBYTE *)(uintptr_t)p;
+	b = (UBYTE *)(uintptr_t)(ULONG)p;
 	b[0] = (UBYTE)(v >> 8);
 	b[1] = (UBYTE)(v & 0xFF);
 }
 
 static UWORD minterm(UWORD a, UWORD b, UWORD c, UBYTE mt) {
-	UWORD out = 0;
-	int bit;
-	for(bit = 0; bit < 16; ++bit) {
-		int ia = (a >> bit) & 1;
-		int ib = (b >> bit) & 1;
-		int ic = (c >> bit) & 1;
-		int idx = (ia << 2) | (ib << 1) | ic;
-		if(mt & (1 << idx)) {
-			out |= (UWORD)(1u << bit);
-		}
+	UWORD na = (UWORD)~a;
+	UWORD nb = (UWORD)~b;
+	UWORD nc = (UWORD)~c;
+	UWORD r = 0;
+	if(mt & 0x01) {
+		r |= na & nb & nc;
 	}
-	return out;
+	if(mt & 0x02) {
+		r |= na & nb & c;
+	}
+	if(mt & 0x04) {
+		r |= na & b & nc;
+	}
+	if(mt & 0x08) {
+		r |= na & b & c;
+	}
+	if(mt & 0x10) {
+		r |= a & nb & nc;
+	}
+	if(mt & 0x20) {
+		r |= a & nb & c;
+	}
+	if(mt & 0x40) {
+		r |= a & b & nc;
+	}
+	if(mt & 0x80) {
+		r |= a & b & c;
+	}
+	return r;
 }
 
 static void blitStandard(int width, int height) {
 	struct Custom *c = g_pHostCustom;
-	int useA = (c->bltcon0 & 0x0800) != 0;
-	int useB = (c->bltcon0 & 0x0400) != 0;
-	int useC = (c->bltcon0 & 0x0200) != 0;
-	int useD = (c->bltcon0 & 0x0100) != 0;
-	int desc = (c->bltcon1 & 2) != 0;
+	int useA = c->bltcon0 & 0x0800;
+	int useB = c->bltcon0 & 0x0400;
+	int useC = c->bltcon0 & 0x0200;
+	int useD = c->bltcon0 & 0x0100;
+	int desc = c->bltcon1 & 2;
 	int fill = (c->bltcon1 >> 2) & 3;
 	int ashift = (c->bltcon0 >> 12) & 0xF;
 	int bshift = (c->bltcon1 >> 12) & 0xF;
 	UBYTE mt = (UBYTE)(c->bltcon0 & 0xFF);
 	int step = desc ? -2 : 2;
-	ULONG pa = ptrOf(c->bltapt);
-	ULONG pb = ptrOf(c->bltbpt);
-	ULONG pc = ptrOf(c->bltcpt);
-	ULONG pd = ptrOf(c->bltdpt);
+	int ms = desc ? -1 : 1;
+	LONG pa = chipAddr(c->bltapt);
+	LONG pb = chipAddr(c->bltbpt);
+	LONG pc = chipAddr(c->bltcpt);
+	LONG pd = chipAddr(c->bltdpt);
 	WORD amod = (WORD)c->bltamod;
 	WORD bmod = (WORD)c->bltbmod;
 	WORD cmod = (WORD)c->bltcmod;
@@ -71,25 +89,22 @@ static void blitStandard(int width, int height) {
 	UWORD afwm = c->bltafwm;
 	UWORD alwm = c->bltalwm;
 	UWORD ahold = 0, bhold = 0;
-	int y, x;
-	int fillCarry = 0;
-	int channels = (useA ? 1 : 0) + (useB ? 1 : 0) + (useC ? 1 : 0) + (useD ? 1 : 0);
-	LONG ms;
-	if(width == 0) {
+	int y, x, nch;
+	if(!width) {
 		width = 64;
 	}
-	if(height == 0) {
+	if(!height) {
 		height = 1024;
 	}
-	if(!useA && !useB && !useC && !useD) {
+	nch = !!useA + !!useB + !!useC + !!useD;
+	if(!nch) {
 		s_slotsLeft = height * width;
 		return;
 	}
 
-	ms = desc ? -1 : 1;
 	for(y = 0; y < height; ++y) {
-		ULONG ra = pa, rb = pb, rc = pc, rd = pd;
-		fillCarry = (c->bltcon1 & 0x04) ? 1 : 0;
+		LONG ra = pa, rb = pb, rc = pc, rd = pd;
+		int fillCarry = (c->bltcon1 & 0x04) != 0;
 		for(x = 0; x < width; ++x) {
 			UWORD a = 0, b = 0, cw = 0, d, rawA, rawB;
 			UWORD mask = 0xFFFF;
@@ -101,7 +116,7 @@ static void blitStandard(int width, int height) {
 			}
 			if(useA) {
 				rawA = r16(ra);
-				ra = (ULONG)((LONG)ra + step);
+				ra += step;
 			}
 			else {
 				rawA = c->bltadat;
@@ -116,7 +131,7 @@ static void blitStandard(int width, int height) {
 			ahold = rawA;
 			if(useB) {
 				rawB = r16(rb);
-				rb = (ULONG)((LONG)rb + step);
+				rb += step;
 			}
 			else {
 				rawB = c->bltbdat;
@@ -130,31 +145,26 @@ static void blitStandard(int width, int height) {
 			bhold = rawB;
 			if(useC) {
 				cw = r16(rc);
-				rc = (ULONG)((LONG)rc + step);
+				rc += step;
 			}
 			d = minterm(a, b, cw, mt);
 			if(fill) {
 				UWORD out = 0;
 				int bit, carry = fillCarry;
-				int inclusive = (fill == 2 || fill == 3);
+				int inclusive = fill >= 2;
 				for(bit = 0; bit < 16; ++bit) {
-					int bidx = desc ? (15 - bit) : bit;
+					int bidx = desc ? 15 - bit : bit;
 					int din = (d >> bidx) & 1;
 					int dout;
 					if(inclusive) {
 						dout = din | carry;
-						if(din) {
-							carry ^= 1;
-						}
 					}
-					else {
-						if(din) {
-							carry ^= 1;
-						}
+					carry ^= din;
+					if(!inclusive) {
 						dout = carry;
 					}
 					if(dout) {
-						out |= (UWORD)(1u << bidx);
+						out |= (UWORD)(1 << bidx);
 					}
 				}
 				fillCarry = carry;
@@ -162,27 +172,27 @@ static void blitStandard(int width, int height) {
 			}
 			if(useD) {
 				w16(rd, d);
-				rd = (ULONG)((LONG)rd + step);
+				rd += step;
 			}
 		}
 		if(useA) {
-			pa = (ULONG)((LONG)ra + ms * (LONG)amod);
+			pa = ra + ms * amod;
 		}
 		if(useB) {
-			pb = (ULONG)((LONG)rb + ms * (LONG)bmod);
+			pb = rb + ms * bmod;
 		}
 		if(useC) {
-			pc = (ULONG)((LONG)rc + ms * (LONG)cmod);
+			pc = rc + ms * cmod;
 		}
 		if(useD) {
-			pd = (ULONG)((LONG)rd + ms * (LONG)dmod);
+			pd = rd + ms * dmod;
 		}
 	}
-	c->bltapt = (APTR)pa;
-	c->bltbpt = (APTR)pb;
-	c->bltcpt = (APTR)pc;
-	c->bltdpt = (APTR)pd;
-	s_slotsLeft = height * width * (channels ? channels : 1);
+	c->bltapt = (APTR)(ULONG)pa;
+	c->bltbpt = (APTR)(ULONG)pb;
+	c->bltcpt = (APTR)(ULONG)pc;
+	c->bltdpt = (APTR)(ULONG)pd;
+	s_slotsLeft = height * width * nch;
 }
 
 static void blitLine(int width, int height) {
@@ -190,12 +200,12 @@ static void blitLine(int width, int height) {
 	int ashift = (c->bltcon0 >> 12) & 0xF;
 	int bshift = (c->bltcon1 >> 12) & 0xF;
 	int sign = (c->bltcon1 & SIGNFLAG) != 0;
-	int sing = (c->bltcon1 & SING) != 0;
-	int sud = (c->bltcon1 & SUD) != 0;
-	int sul = (c->bltcon1 & SUL) != 0;
-	int aul = (c->bltcon1 & AUL) != 0;
-	int useA = (c->bltcon0 & 0x0800) != 0;
-	int useC = (c->bltcon0 & 0x0200) != 0;
+	int sing = c->bltcon1 & SING;
+	int sud = c->bltcon1 & SUD;
+	int sul = c->bltcon1 & SUL;
+	int aul = c->bltcon1 & AUL;
+	int useA = c->bltcon0 & 0x0800;
+	int useC = c->bltcon0 & 0x0200;
 	UBYTE mt = (UBYTE)(c->bltcon0 & 0xFF);
 	UWORD afwm = c->bltafwm;
 	UWORD alwm = c->bltalwm;
@@ -204,35 +214,30 @@ static void blitLine(int width, int height) {
 	WORD amod = (WORD)c->bltamod;
 	WORD bmod = (WORD)c->bltbmod;
 	WORD cmod = (WORD)c->bltcmod;
-	ULONG pc = ptrOf(c->bltcpt);
-	ULONG pd = ptrOf(c->bltdpt);
-	LONG apt = (LONG)(WORD)(UWORD)((ULONG)c->bltapt & 0xFFFFu);
+	LONG pc = chipAddr(c->bltcpt);
+	LONG pd = chipAddr(c->bltdpt);
+	LONG apt = (WORD)(ULONG)c->bltapt;
 	UWORD blineb;
 	int onedot = 0;
-	int ovf = 0;
 	int i;
 
-	if(height == 0) {
+	if(!height) {
 		height = 1024;
 	}
-	if(width == 0) {
+	if(!width) {
 		width = 64;
 	}
 
-	blineb = (UWORD)((bdat >> bshift) | (bdat << ((16 - bshift) & 15)));
-	if(bshift == 0) {
-		blineb = bdat;
-	}
-
+	blineb = ror16(bdat, (UBYTE)bshift);
 	for(i = 0; i < height; ++i) {
 		int plot = !sing || !onedot;
-		UWORD mask, ahold, bhold, chold, d;
 		int oldSign = sign;
+		UWORD mask, ahold, bhold, chold, d;
+		int ovf = 0;
 
 		onedot = 1;
-
 		if(useA) {
-			apt += oldSign ? (LONG)bmod : (LONG)amod;
+			apt += oldSign ? bmod : amod;
 		}
 
 		mask = afwm;
@@ -240,70 +245,44 @@ static void blitLine(int width, int height) {
 			mask &= alwm;
 		}
 		ahold = (UWORD)((adat & mask) >> ashift);
-		bhold = (UWORD)((blineb & 1u) ? 0xFFFFu : 0);
+		bhold = (blineb & 1) ? 0xFFFF : 0;
 		chold = useC ? r16(pc) : 0;
 		d = minterm(ahold, bhold, chold, mt);
 
-		if(width > 1) {
-			if(!oldSign && !sud) {
-				if(sul) {
-					if(ashift == 0) {
-						pc -= 2;
-					}
-					ovf = -1;
+		if(width > 1 && (sud || !oldSign)) {
+			int left = sud ? aul : sul;
+			if(left) {
+				if(ashift == 0) {
+					pc -= 2;
 				}
-				else {
-					if(ashift == 15) {
-						pc += 2;
-					}
-					ovf = 1;
-				}
+				ovf = -1;
 			}
-			if(sud) {
-				if(aul) {
-					if(ashift == 0) {
-						pc -= 2;
-					}
-					ovf = -1;
+			else {
+				if(ashift == 15) {
+					pc += 2;
 				}
-				else {
-					if(ashift == 15) {
-						pc += 2;
-					}
-					ovf = 1;
-				}
+				ovf = 1;
 			}
 		}
-
 		ashift = (ashift + ovf) & 15;
-		ovf = 0;
 
-		if(width >= 2) {
-			if(!oldSign && sud) {
-				pc = (ULONG)((LONG)pc + (sul ? -(LONG)cmod : (LONG)cmod));
-				onedot = 0;
-			}
-			if(!sud) {
-				pc = (ULONG)((LONG)pc + (aul ? -(LONG)cmod : (LONG)cmod));
-				onedot = 0;
-			}
+		if(width >= 2 && (!sud || !oldSign)) {
+			int up = sud ? sul : aul;
+			pc += up ? -cmod : cmod;
+			onedot = 0;
 		}
 
 		sign = (WORD)apt < 0;
 		bshift = (bshift - 1) & 15;
-		blineb = (UWORD)((bdat >> bshift) | (bdat << ((16 - bshift) & 15)));
-		if(bshift == 0) {
-			blineb = bdat;
-		}
-
+		blineb = ror16(bdat, (UBYTE)bshift);
 		if(plot && useC) {
 			w16(pd, d);
 		}
 		pd = pc;
 	}
 
-	c->bltcpt = (APTR)pc;
-	c->bltdpt = (APTR)pd;
+	c->bltcpt = (APTR)(ULONG)pc;
+	c->bltdpt = (APTR)(ULONG)pd;
 	c->bltapt = (APTR)(ULONG)(UWORD)apt;
 	c->bltcon0 = (UWORD)((c->bltcon0 & 0x0FFF) | (ashift << 12));
 	c->bltcon1 = (UWORD)((c->bltcon1 & 0x0FFF & (UWORD)~SIGNFLAG) |
@@ -314,7 +293,6 @@ static void blitLine(int width, int height) {
 void blitterInit(void) {
 	s_busy = 0;
 	s_slotsLeft = 0;
-	s_lineMode = 0;
 }
 
 void blitterStart(UWORD uwBltSize) {
@@ -322,9 +300,8 @@ void blitterStart(UWORD uwBltSize) {
 }
 
 void blitterStartWH(int height, int width) {
-	s_lineMode = (g_pHostCustom->bltcon1 & 1) != 0;
 	s_busy = 1;
-	if(s_lineMode) {
+	if(g_pHostCustom->bltcon1 & 1) {
 		blitLine(width, height);
 	}
 	else {

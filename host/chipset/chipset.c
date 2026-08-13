@@ -44,15 +44,10 @@ static UWORD s_copWaitIr2;
 static UWORD s_fb[ACE_HOST_FB_WIDTH * ACE_HOST_FB_HEIGHT_PAL];
 static UBYTE s_lineDma[ACE_HOST_SLOTS_PER_LINE];
 static ULONG s_bplPtr[8];
-static UWORD s_bplDat[8];
-static int s_bplShift[8];
-static int s_fetchRemain;
-static int s_diwOn;
 
 static ULONG s_sprPtr[8];
 static int s_sprArmed[8];
 static int s_sprActive[8];
-static UWORD s_sprPos[8], s_sprCtl[8];
 static UWORD s_sprDatA[8][4], s_sprDatB[8][4];
 static int s_sprX[8], s_sprY0[8], s_sprY1[8], s_sprAttach[8];
 
@@ -60,7 +55,6 @@ static UWORD s_lastBltsize, s_lastCopjmp1, s_lastCopjmp2;
 static UWORD s_lastDmaconW, s_lastIntenaW, s_lastIntreqW;
 
 static int s_bplWordsThisLine;
-static int s_dispX;
 static int s_slotsThisLine;
 static int s_linesThisFrame;
 static int s_linesLastFrame;
@@ -75,51 +69,37 @@ static ULONG hwPtr(ULONG ulReg) {
 		}
 		return ulReg;
 	}
-	if(ulReg && !aceHostIsChipAddr(ulReg)) {
+	{
 		static int s_warned;
 		if(!s_warned) {
 			fprintf(stderr, "[ACE_HOST] DMA pointer %08lX is not CHIP — skipped\n",
 				(unsigned long)ulReg);
 			s_warned = 1;
 		}
-		return 0;
 	}
-	return ulReg;
-}
-
-static UWORD *chipWord(ULONG ulHost) {
-	if(!ulHost) {
-		return 0;
-	}
-	return (UWORD *)(uintptr_t)ulHost;
+	return 0;
 }
 
 static UWORD readChipWord(ULONG ulHost) {
-	UWORD *p = chipWord(ulHost);
-	if(!p) {
+	const UBYTE *b;
+	if(!ulHost) {
 		return 0;
 	}
-	/* CHIP bytes are Amiga big-endian. */
-	{
-		const UBYTE *b = (const UBYTE *)p;
-		return (UWORD)((b[0] << 8) | b[1]);
-	}
+	b = (const UBYTE *)(uintptr_t)ulHost;
+	return (UWORD)((b[0] << 8) | b[1]);
 }
 
 static void writeChipWord(ULONG ulHost, UWORD uw) {
-	UWORD *p = chipWord(ulHost);
-	if(!p) {
+	UBYTE *b;
+	if(!ulHost) {
 		return;
 	}
-	{
-		UBYTE *b = (UBYTE *)p;
-		b[0] = (UBYTE)(uw >> 8);
-		b[1] = (UBYTE)(uw & 0xFF);
-	}
+	b = (UBYTE *)(uintptr_t)ulHost;
+	b[0] = (UBYTE)(uw >> 8);
+	b[1] = (UBYTE)(uw & 0xFF);
 }
 
 static void updateVposRegs(void) {
-	/* vhposr: V7-0 in high byte, H8-1 in low byte. vposr: V8 in bit 0. */
 	g_pHostCustom->vhposr = (UWORD)(((s_uwVpos & 0xFF) << 8) | (s_uwHpos & 0xFF));
 	g_pHostCustom->vposr = (UWORD)((s_uwVpos >> 8) & 1);
 	g_pHostCustom->dmaconr = (UWORD)(
@@ -147,7 +127,6 @@ static void copperJump(ULONG ulLc) {
 }
 
 static int copperReached(UWORD uwIr1, UWORD uwIr2) {
-	/* OCS: VE is VP6–VP0 (IR2 bits 14–8). VP7 cannot be masked (HRM / WinUAE). */
 	UWORD vmask = (UWORD)(((uwIr2 >> 8) & 0x7F) | 0x80);
 	UWORD hmask = (UWORD)(uwIr2 & 0xFE);
 	UWORD vp = (UWORD)(s_uwVpos & vmask);
@@ -172,12 +151,9 @@ static int isTerminator(UWORD uwIr1, UWORD uwIr2) {
 
 static void customWriteUword(UWORD uwOffs, UWORD uwVal);
 
-static void copperMove(UWORD uwDest, UWORD uwVal) {
-	customWriteUword(uwDest, uwVal);
-}
-
 static int copperTick(void) {
 	UWORD uwIr1, uwIr2;
+	const UBYTE *p;
 	if(!(s_uwDmacon & DMAF_COPPER) || !(s_uwDmacon & DMAF_MASTER) || s_copHalted) {
 		return 0;
 	}
@@ -195,15 +171,13 @@ static int copperTick(void) {
 		return 0;
 	}
 
-	{
-		const UBYTE *p = (const UBYTE *)(uintptr_t)s_ulCopPc;
-		if(!aceHostIsChipPtr(p)) {
-			s_copHalted = 1;
-			return 0;
-		}
-		uwIr1 = readChipWord(s_ulCopPc);
-		uwIr2 = readChipWord(s_ulCopPc + 2);
+	p = (const UBYTE *)(uintptr_t)s_ulCopPc;
+	if(!aceHostIsChipPtr(p)) {
+		s_copHalted = 1;
+		return 0;
 	}
+	uwIr1 = readChipWord(s_ulCopPc);
+	uwIr2 = readChipWord(s_ulCopPc + 2);
 	s_ulCopPc += 4;
 
 	if(uwIr1 & 1) {
@@ -235,15 +209,8 @@ static int copperTick(void) {
 		s_copSkip = 0;
 		return 1;
 	}
-	copperMove((UWORD)(uwIr1 & 0x1FE), uwIr2);
+	customWriteUword((UWORD)(uwIr1 & 0x1FE), uwIr2);
 	return 1;
-}
-
-static void startBlit(UWORD uwSize) {
-	if(!(s_uwDmacon & DMAF_BLITTER) && !(s_uwDmacon & DMAF_MASTER)) {
-		/* Still run; ACE often starts blit with blitter DMA already on. */
-	}
-	blitterStart(uwSize);
 }
 
 static void startBlitEcs(UWORD uwHeight, UWORD uwWidth) {
@@ -293,6 +260,25 @@ static int customPtrRegBase(UWORD uwOffs, UWORD *pBase) {
 	return 0;
 }
 
+static void storeColor(int reg, UWORD uwVal) {
+	int bank = 0, loct = 0, idx;
+#ifdef ACE_USE_AGA_FEATURES
+	bank = (g_pHostCustom->bplcon3 >> 13) & 7;
+	loct = (g_pHostCustom->bplcon3 & 0x0200) != 0;
+#endif
+	idx = bank * 32 + (reg & 31);
+	s_colorSeen[reg & 31] = uwVal;
+	if(loct) {
+		s_colorLo[idx] = (UWORD)(uwVal & 0x0FFF);
+	}
+	else {
+		s_colorHi[idx] = (UWORD)(uwVal & 0x0FFF);
+#ifndef ACE_USE_AGA_FEATURES
+		s_colorLo[idx] = 0;
+#endif
+	}
+}
+
 static void customWriteUword(UWORD uwOffs, UWORD uwVal) {
 	UWORD uwBase;
 	if(uwOffs + 1 >= sizeof(struct Custom)) {
@@ -314,32 +300,16 @@ static void customWriteUword(UWORD uwOffs, UWORD uwVal) {
 	}
 
 	if(uwOffs >= 0x180 && uwOffs <= 0x1BE && (uwOffs & 1) == 0) {
-		int reg = (int)((uwOffs - 0x180) / 2);
-		int bank = 0, loct = 0, idx;
-#ifdef ACE_USE_AGA_FEATURES
-		bank = (g_pHostCustom->bplcon3 >> 13) & 7;
-		loct = (g_pHostCustom->bplcon3 & 0x0200) != 0;
-#endif
-		idx = bank * 32 + (reg & 31);
-		s_colorSeen[reg & 31] = uwVal;
-		if(loct) {
-			s_colorLo[idx] = (UWORD)(uwVal & 0x0FFF);
-		}
-		else {
-			s_colorHi[idx] = (UWORD)(uwVal & 0x0FFF);
-#ifndef ACE_USE_AGA_FEATURES
-			s_colorLo[idx] = 0;
-#endif
-		}
+		storeColor((int)((uwOffs - 0x180) / 2), uwVal);
 	}
 
 	switch(uwOffs) {
-		case 0x058: /* BLTSIZE — write strobes a blit even if the size is unchanged */
-			startBlit(uwVal);
+		case 0x058: /* BLTSIZE */
+			blitterStart(uwVal);
 			s_lastBltsize = uwVal;
 			g_pHostCustom->bltsize = 0;
 			break;
-		case 0x05E: /* BLTSIZH — ECS strobe; size from BLTSIZV + this write */
+		case 0x05E: /* BLTSIZH */
 			startBlitEcs(g_pHostCustom->bltsizv, uwVal);
 			g_pHostCustom->bltsizh = 0;
 			break;
@@ -359,7 +329,6 @@ static void customWriteUword(UWORD uwOffs, UWORD uwVal) {
 				applySetClr(&s_uwDmacon, uwVal);
 				if((s_uwDmacon & DMAF_MASTER) == 0) {
 					s_uwDmacon &= (UWORD)~0x03FF;
-					s_uwDmacon |= (UWORD)(uwVal & 0x8000 ? 0 : 0);
 					applySetClr(&s_uwDmacon, uwVal);
 				}
 				paulaOnDmaEnable(uwOld, s_uwDmacon);
@@ -385,7 +354,7 @@ static void customWriteUword(UWORD uwOffs, UWORD uwVal) {
 void chipsetSyncCpuWrites(void) {
 	struct Custom *c = g_pHostCustom;
 	if(c->bltsize) {
-		startBlit(c->bltsize);
+		blitterStart(c->bltsize);
 		s_lastBltsize = c->bltsize;
 		c->bltsize = 0;
 	}
@@ -420,35 +389,12 @@ void chipsetSyncCpuWrites(void) {
 	{
 		int i;
 		for(i = 0; i < 32; ++i) {
-			UWORD uw = c->color[i];
-			if(uw != s_colorSeen[i]) {
-				int bank = 0, loct = 0, idx;
-#ifdef ACE_USE_AGA_FEATURES
-				bank = (c->bplcon3 >> 13) & 7;
-				loct = (c->bplcon3 & 0x0200) != 0;
-#endif
-				idx = bank * 32 + i;
-				s_colorSeen[i] = uw;
-				if(loct) {
-					s_colorLo[idx] = (UWORD)(uw & 0x0FFF);
-				}
-				else {
-					s_colorHi[idx] = (UWORD)(uw & 0x0FFF);
-#ifndef ACE_USE_AGA_FEATURES
-					s_colorLo[idx] = 0;
-#endif
-				}
+			if(c->color[i] != s_colorSeen[i]) {
+				storeColor(i, c->color[i]);
 			}
 		}
 	}
 	updateVposRegs();
-}
-
-static void latchBplPtrs(void) {
-	int i;
-	for(i = 0; i < 8; ++i) {
-		s_bplPtr[i] = hwPtr(g_pHostCustom->bplpt[i]);
-	}
 }
 
 static void latchSprPtrs(void) {
@@ -479,8 +425,6 @@ static int isHires(void) {
 	return (g_pHostCustom->bplcon0 & 0x8000) != 0;
 }
 
-/* fetchmode.h: FMODE 0 = 16px/1 word, 1–2 = 32px/2 words, 3 = 64px/4 words.
- * HIRES halves the CCK period (4 vs 8) but FMODE still sets fetch width. */
 static int fmodeShift(void) {
 #ifdef ACE_USE_AGA_FEATURES
 	switch(g_pHostCustom->fmode & 3) {
@@ -509,27 +453,11 @@ static UWORD ddfMask(void) {
 	return (UWORD)~(bplFetchPeriod() - 1);
 }
 
-static int fetchPrefetchPixels(void) {
-	/* One fetch in the Denise pipeline (fetchmode scroll prefetch is 2/4/8 bytes). */
-	return bplFetchWords() * 16;
-}
-
 static int inDdf(UWORD h) {
 	UWORD mask = ddfMask();
 	UWORD strt = (UWORD)(g_pHostCustom->ddfstrt & mask);
 	UWORD stop = (UWORD)(g_pHostCustom->ddfstop & mask);
 	return h >= strt && h <= stop;
-}
-
-static void fetchBplWord(void) {
-	int d = bplDepth();
-	int i;
-	for(i = 0; i < d; ++i) {
-		s_bplDat[i] = readChipWord(s_bplPtr[i]);
-		s_bplPtr[i] += 2;
-		g_pHostCustom->bplpt[i] = (APTR)s_bplPtr[i];
-	}
-	s_bplWordsThisLine++;
 }
 
 static void endOfLineModulo(void) {
@@ -544,23 +472,10 @@ static void endOfLineModulo(void) {
 	}
 }
 
-static UWORD palToRgb(UWORD c) {
-	unsigned r = (c >> 8) & 0xF;
-	unsigned g = (c >> 4) & 0xF;
-	unsigned b = c & 0xF;
-	r |= (unsigned)(r << 4);
-	g |= (unsigned)(g << 4);
-	b |= (unsigned)(b << 4);
-	return (UWORD)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
-}
-
 static int diwH0(void) { return g_pHostCustom->diwstrt & 0xFF; }
 static int diwH1(void) { return (g_pHostCustom->diwstop & 0xFF) | 0x100; }
 static int diwV0(void) { return (g_pHostCustom->diwstrt >> 8) & 0xFF; }
 static int diwV1(void) {
-	/* OCS stores only 8 bits of VSTOP; V8 is the complement of V7.
-	 * A PAL 256-line window is VSTART=44 / VSTOP=300 — both 0x2C in the
-	 * low 8 bits — so "stop < start => +256" leaves an empty range. */
 	int v = (g_pHostCustom->diwstop >> 8) & 0xFF;
 	if(!(v & 0x80)) {
 		v |= 0x100;
@@ -569,13 +484,23 @@ static int diwV1(void) {
 }
 
 static void plot(int x, int y, UWORD rgb) {
-	if((unsigned)x >= ACE_HOST_FB_WIDTH || (unsigned)y >= (unsigned)(s_isPal ? ACE_HOST_FB_HEIGHT_PAL : ACE_HOST_FB_HEIGHT_NTSC)) {
+	int fbH = s_isPal ? ACE_HOST_FB_HEIGHT_PAL : ACE_HOST_FB_HEIGHT_NTSC;
+	if((unsigned)x >= ACE_HOST_FB_WIDTH || (unsigned)y >= (unsigned)fbH) {
 		return;
 	}
 	s_fb[y * ACE_HOST_FB_WIDTH + x] = rgb;
 }
 
-/* Line buffer: 8 planes × 64 words (640px hires + AGA prefetch). */
+static void plotSlot(int x, int y, int hires, UWORD rgb) {
+	if(hires) {
+		plot(x, y, rgb);
+	}
+	else {
+		plot(x * 2, y, rgb);
+		plot(x * 2 + 1, y, rgb);
+	}
+}
+
 static UWORD s_bplLine[8][64];
 static int s_bplFetchIdx;
 
@@ -583,8 +508,6 @@ static void fetchBplIntoLine(void) {
 	int d = bplDepth();
 	int words = bplFetchWords();
 	int w, i;
-	/* Live BPLPT each fetch — copper MOVEs after WAIT 43,220 finish
-	 * on this line before DDFSTRT, so a start-of-line latch is too early. */
 	for(w = 0; w < words; ++w) {
 		if(s_bplFetchIdx >= 64) {
 			return;
@@ -602,31 +525,17 @@ static void fetchBplIntoLine(void) {
 
 static int scrollDelay(int even) {
 	UWORD con1 = g_pHostCustom->bplcon1;
-	int delay;
-	if(even) {
-		delay = (con1 >> 4) & 0xF;
+	int delay = even ? (con1 >> 4) & 0xF : con1 & 0xF;
 #ifdef ACE_USE_AGA_FEATURES
-		if(con1 & 0x4000) {
-			delay |= 0x10;
-		}
-		if(con1 & 0x8000) {
-			delay |= 0x20;
-		}
-#endif
+	if(con1 & (even ? 0x4000 : 0x0400)) {
+		delay |= 0x10;
 	}
-	else {
-		delay = con1 & 0xF;
-#ifdef ACE_USE_AGA_FEATURES
-		if(con1 & 0x0400) {
-			delay |= 0x10;
-		}
-		if(con1 & 0x0800) {
-			delay |= 0x20;
-		}
-#endif
+	if(con1 & (even ? 0x8000 : 0x0800)) {
+		delay |= 0x20;
 	}
-	if(isHires()) {
-		delay *= 2; /* BPLCON1 unit is 2 hires pixels */
+#endif
+	if(g_pHostCustom->bplcon0 & 0x8000) {
+		delay *= 2;
 	}
 	return delay;
 }
@@ -651,19 +560,6 @@ static int pixelColor(int pix) {
 	return idx;
 }
 
-static int isEhbMode(void) {
-	if(bplDepth() != 6) {
-		return 0;
-	}
-	if(g_pHostCustom->bplcon0 & 0x0800) {
-		return 0; /* HAM */
-	}
-	if(g_pHostCustom->bplcon2 & 0x0200) {
-		return 0; /* KILLEHB */
-	}
-	return 1;
-}
-
 static UWORD rgbFrom12(UWORD hi, UWORD lo) {
 	unsigned r = ((hi >> 8) & 0xF) << 4;
 	unsigned g = ((hi >> 4) & 0xF) << 4;
@@ -682,9 +578,11 @@ static UWORD rgbFrom12(UWORD hi, UWORD lo) {
 }
 
 static UWORD colorLookup(int idx) {
-	int ehb = 0;
-	if(isEhbMode() && idx >= 32) {
-		ehb = 1;
+	int ehb = bplDepth() == 6 &&
+		!(g_pHostCustom->bplcon0 & 0x0800) &&
+		!(g_pHostCustom->bplcon2 & 0x0200) &&
+		idx >= 32;
+	if(ehb) {
 		idx -= 32;
 	}
 #ifdef ACE_USE_AGA_FEATURES
@@ -693,7 +591,7 @@ static UWORD colorLookup(int idx) {
 	idx &= 31;
 #endif
 	if(ehb) {
-		return palToRgb((UWORD)((s_colorHi[idx] >> 1) & 0x0777));
+		return rgbFrom12((UWORD)((s_colorHi[idx] >> 1) & 0x0777), 0);
 	}
 	return rgbFrom12(s_colorHi[idx], s_colorLo[idx]);
 }
@@ -714,19 +612,12 @@ static int sprFetchWords(void) {
 #endif
 }
 
-static int sprWidthPx(void) {
-	return sprFetchWords() * 16;
-}
-
 static void spriteFetchCtl(int ch) {
-	/* ACE writes POS/CTL as native UWORDs; CHIP DMA pixels stay Amiga BE. */
 	UWORD *p = (UWORD *)(uintptr_t)s_sprPtr[ch];
 	UWORD pos = p ? p[0] : 0;
 	UWORD ctl = p ? p[1] : 0;
 	s_sprPtr[ch] += 4;
 	g_pHostCustom->sprpt[ch] = (APTR)s_sprPtr[ch];
-	s_sprPos[ch] = pos;
-	s_sprCtl[ch] = ctl;
 	s_sprY0[ch] = (pos >> 8) | ((ctl & 4) ? 0x100 : 0);
 	s_sprY1[ch] = (ctl >> 8) | ((ctl & 2) ? 0x100 : 0);
 	s_sprX[ch] = ((pos & 0xFF) << 1) | (ctl & 1);
@@ -753,38 +644,32 @@ static void spriteFetchDataSlot(int ch, int phase) {
 
 static int spritePixel(int x, int *pColor, int *pPri) {
 	int ch, bestPri = 99, found = 0, col = 0;
+	int sprW = sprFetchWords() * 16;
 	for(ch = 0; ch < 8; ++ch) {
-		int sx, two;
-		if(!s_sprActive[ch]) {
-			continue;
-		}
-		if((ch & 1) && s_sprAttach[ch]) {
+		int sx, two, off, word, bit;
+		if(!s_sprActive[ch] || ((ch & 1) && s_sprAttach[ch])) {
 			continue;
 		}
 		sx = s_sprX[ch];
-		if(x < sx || x >= sx + sprWidthPx()) {
+		if(x < sx || x >= sx + sprW) {
 			continue;
 		}
-		{
-			int off = x - sx;
-			int word = off / 16;
-			int bit = 15 - (off & 15);
-			two = 0;
-			if(s_sprDatA[ch][word] & (1u << bit)) {
-				two |= 1;
+		off = x - sx;
+		word = off / 16;
+		bit = 15 - (off & 15);
+		two = 0;
+		if(s_sprDatA[ch][word] & (1u << bit)) {
+			two |= 1;
+		}
+		if(s_sprDatB[ch][word] & (1u << bit)) {
+			two |= 2;
+		}
+		if((ch + 1) < 8 && s_sprAttach[ch + 1] && s_sprActive[ch + 1]) {
+			if(s_sprDatA[ch + 1][word] & (1u << bit)) {
+				two |= 4;
 			}
-			if(s_sprDatB[ch][word] & (1u << bit)) {
-				two |= 2;
-			}
-			if((ch + 1) < 8 && s_sprAttach[ch + 1] && s_sprActive[ch + 1]) {
-				int t2 = 0;
-				if(s_sprDatA[ch + 1][word] & (1u << bit)) {
-					t2 |= 1;
-				}
-				if(s_sprDatB[ch + 1][word] & (1u << bit)) {
-					t2 |= 2;
-				}
-				two |= t2 << 2;
+			if(s_sprDatB[ch + 1][word] & (1u << bit)) {
+				two |= 8;
 			}
 		}
 		if(two) {
@@ -792,7 +677,7 @@ static int spritePixel(int x, int *pColor, int *pPri) {
 			if(pri < bestPri) {
 				bestPri = pri;
 				col = two;
-				found = ch + 1; /* 1-based channel */
+				found = ch + 1;
 			}
 		}
 	}
@@ -823,10 +708,8 @@ static void renderSlotPixels(void) {
 	int inV = (int)s_uwVpos >= diwV0() && (int)s_uwVpos < diwV1();
 	int colorOn = (g_pHostCustom->bplcon0 & 0x0200) != 0;
 	int ddfStrt = (int)(g_pHostCustom->ddfstrt & ddfMask());
-	int prefetch = fetchPrefetchPixels();
+	int prefetch = bplFetchWords() * 16;
 
-	/* COLORON off: Denise blanks the playfield. Skip the plot loop so
-	 * blit-wait slot simulation during startup is not a full rasterizer. */
 	if(!colorOn || !inV || yDisp < 0 || yDisp >= fbH) {
 		return;
 	}
@@ -840,14 +723,7 @@ static void renderSlotPixels(void) {
 			continue;
 		}
 		if(hxLores < h0 || hxLores >= diwH1()) {
-			rgb = colorLookup(0);
-			if(hires) {
-				plot(xDisp, yDisp, rgb);
-			}
-			else {
-				plot(xDisp * 2, yDisp, rgb);
-				plot(xDisp * 2 + 1, yDisp, rgb);
-			}
+			plotSlot(xDisp, yDisp, hires, colorLookup(0));
 			continue;
 		}
 		idx = 0;
@@ -860,23 +736,15 @@ static void renderSlotPixels(void) {
 		rgb = colorLookup(idx);
 		if((s_uwDmacon & DMAF_SPRITE) && spritePixel(hxLores, &sprCol, &sprPri)) {
 			int pfPri = (int)(g_pHostCustom->bplcon2 & 7);
-			int sprInFront = (sprPri < pfPri) || idx == 0;
-			if(sprCol && sprInFront) {
+			if(sprCol && (sprPri < pfPri || idx == 0)) {
 				rgb = colorLookup(sprCol);
 			}
 		}
-		if(hires) {
-			plot(xDisp, yDisp, rgb);
-		}
-		else {
-			plot(xDisp * 2, yDisp, rgb);
-			plot(xDisp * 2 + 1, yDisp, rgb);
-		}
+		plotSlot(xDisp, yDisp, hires, rgb);
 	}
 }
 
 static int spriteSlotChannel(UWORD h) {
-	/* OCS: sprite DMA at 0x15,0x17,...,0x23 (2 slots each for 8 sprites). */
 	if(h < 0x15 || h > 0x24) {
 		return -1;
 	}
@@ -888,7 +756,6 @@ static void beginLine(void) {
 	memset(s_lineDma, ACE_HOST_DMA_IDLE, sizeof(s_lineDma));
 	s_bplFetchIdx = 0;
 	s_bplWordsThisLine = 0;
-	s_dispX = 0;
 	s_bplBusyRemain = 0;
 	s_copSlotRemain = 0;
 	if(s_uwVpos == 0) {
@@ -1003,7 +870,7 @@ static void runOneSlot(void) {
 		else if(copperTick()) {
 			kind = ACE_HOST_DMA_COPPER;
 			used = 1;
-			s_copSlotRemain = 1; /* 2-word copper instruction */
+			s_copSlotRemain = 1;
 		}
 		else if(blitterBusy() && (s_uwDmacon & DMAF_BLITTER) && (s_uwDmacon & DMAF_MASTER)) {
 			blitterUseSlot();
@@ -1056,16 +923,12 @@ void chipsetRunSlots(unsigned n) {
 	if(!nested) {
 		aceHostDispatchInts(s_uwIntreq);
 	}
-	/* Present on vblank from the game loop, not from WaitBlit: a blit-wait
-	 * wrap would vsync-sleep the CPU path. Leave s_frameReady for aceHostTick. */
 	if(s_frameReady && !s_blitWait) {
 		s_frameReady = 0;
 		s_vblankThisTick = 1;
 		aceHostOnVblank();
 	}
 	s_inChipset--;
-	/* CIA-A serial after the beam step so key.c's 3-scanline SPMODE wait
-	 * via getRayPos() is not nested inside endLine (which would double-count). */
 	if(!s_inChipset) {
 		ciaPollKbd();
 	}
@@ -1086,8 +949,6 @@ void chipsetWaitBlit(void) {
 }
 
 void aceHostTick(void) {
-	/* Real Agnus keeps scanning even if the game never WaitTOF. Without a
-	 * beam wait there is no vblank, so SDL never pumps and the window freezes. */
 	if(!s_vblankThisTick) {
 		if(s_frameReady) {
 			s_frameReady = 0;
@@ -1239,39 +1100,10 @@ void chipsetCopperDisasm(char *pBuf, unsigned bufSize, unsigned maxInsns) {
 			}
 		}
 		else {
-			static const char *kReg[] = {
-				0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-				0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-				"BLTCON0","BLTCON1","BLTAFWM","BLTALWM",
-				"BLTCPTH","BLTCPTL","BLTBPTH","BLTBPTL","BLTAPTH","BLTAPTL",
-				"BLTDPTH","BLTDPTL","BLTSIZE","BLTCON0L","BLTSIZV","BLTSIZH"
-			};
-			UWORD dest = (UWORD)(uwIr1 & 0x1FE);
-			const char *nm = 0;
-			if((dest >> 1) < (UWORD)(sizeof(kReg)/sizeof(kReg[0]))) {
-				nm = kReg[dest >> 1];
-			}
-			if(!nm) {
-				if(dest >= 0x180 && dest <= 0x1BE) {
-					nm = "COLOR";
-				}
-				else if(dest >= 0x0E0 && dest <= 0x0FC) {
-					nm = "BPLxPT";
-				}
-				else if(dest >= 0x120 && dest <= 0x13C) {
-					nm = "SPRxPT";
-				}
-			}
-			if(nm) {
-				off += (unsigned)snprintf(
-					pBuf + off, bufSize - off, "MOVE %s,%04X\n", nm, uwIr2
-				);
-			}
-			else {
-				off += (unsigned)snprintf(
-					pBuf + off, bufSize - off, "MOVE %03X,%04X\n", dest, uwIr2
-				);
-			}
+			off += (unsigned)snprintf(
+				pBuf + off, bufSize - off, "MOVE %03X,%04X\n",
+				uwIr1 & 0x1FE, uwIr2
+			);
 		}
 		pc += 4;
 		n++;
@@ -1282,7 +1114,8 @@ void chipsetReset(void) {
 	s_uwVpos = 0;
 	s_uwHpos = 0;
 	s_uwDmacon = DMAF_MASTER;
-	s_uwIntena = INTF_INTEN;
+	/* Match ACE's no-OS game path: master + VERTB so timerOnInterrupt runs. */
+	s_uwIntena = INTF_INTEN | INTF_VERTB | INTF_PORTS | INTF_EXTER;
 	s_uwIntreq = 0;
 	s_copHalted = 1;
 	s_ulCopPc = 0;
@@ -1327,8 +1160,6 @@ void chipsetInit(int isPal) {
 void chipsetShutdown(void) {
 	paulaShutdown();
 }
-
-static const char *s_regNames[256]; /* filled lazily in disasm via copper.c names */
 
 void aceHostPump(void) {
 	aceHostSdlPump();
