@@ -123,14 +123,14 @@ BPTR Lock(CONST_STRPTR name, LONG accessMode) {
 	if(!sz || !hostOsIsDir(sz)) {
 		return 0;
 	}
-	p = (tHostDir *)calloc(1, sizeof(tHostDir));
+	p = (tHostDir *)(uintptr_t)AllocMem(sizeof(tHostDir), MEMF_ANY | MEMF_CLEAR);
 	if(!p) {
 		return 0;
 	}
 	strncpy(p->szPath, sz, sizeof(p->szPath) - 1);
 	p->pOs = hostOsDirOpen(sz);
 	if(!p->pOs) {
-		free(p);
+		FreeMem((APTR)(uintptr_t)p, sizeof(tHostDir));
 		return 0;
 	}
 	return (BPTR)p;
@@ -142,7 +142,7 @@ void UnLock(BPTR lock) {
 		return;
 	}
 	hostOsDirClose(p->pOs);
-	free(p);
+	FreeMem((APTR)(uintptr_t)p, sizeof(tHostDir));
 }
 
 LONG Examine(BPTR lock, struct FileInfoBlock *fib) {
@@ -235,6 +235,7 @@ static int s_isPal = 1;
 #endif
 
 void systemCreate(void) {
+	aceHostCrashInit();
 	aceHostMemInit(
 		(tAceHostMachine)ACE_HOST_MACHINE_ENUM,
 		(tAceHostMemMode)ACE_HOST_MEM_MODE_ENUM,
@@ -250,6 +251,8 @@ void systemCreate(void) {
 	s_uwAceDmaCon = 0;
 	g_pCustom->dmacon = DMAF_SETCLR | DMAF_MASTER;
 	chipsetSyncCpuWrites();
+	/* Amiga systemCreate() starts with OS owning the blitter, then takes it. */
+	systemGetBlitterFromOs();
 }
 
 void systemDestroy(void) {
@@ -269,11 +272,19 @@ void systemUnuse(void) { if(s_wSystemUses) { --s_wSystemUses; } }
 UBYTE systemIsUsed(void) { return s_wSystemUses > 0; }
 
 void systemGetBlitterFromOs(void) {
+	if(s_wSystemBlitterUses == 1) {
+		WaitBlit();
+	}
 	if(s_wSystemBlitterUses) {
 		--s_wSystemBlitterUses;
 	}
 }
-void systemReleaseBlitterToOs(void) { ++s_wSystemBlitterUses; }
+void systemReleaseBlitterToOs(void) {
+	if(!s_wSystemBlitterUses) {
+		WaitBlit();
+	}
+	++s_wSystemBlitterUses;
+}
 UBYTE systemBlitterIsReleasedToOs(void) { return s_wSystemBlitterUses > 0; }
 
 void systemDump(void) {}
@@ -353,17 +364,25 @@ void systemRestoreCpuCaches(void) {}
 void aceHostDispatchInts(UWORD uwPending) {
 	int i;
 	UWORD ena = g_pCustom->intenar;
+	UWORD handled = 0;
 	if(!(ena & INTF_INTEN)) {
 		return;
 	}
 	if((uwPending & INTF_VERTB) && (ena & INTF_VERTB)) {
 		timerOnInterrupt();
+		handled |= INTF_VERTB;
 	}
 	for(i = 0; i < 14; ++i) {
 		UWORD bit = (UWORD)(1u << i);
 		if((uwPending & bit) && (ena & bit) && s_pAceInterrupts[i].pHandler) {
 			s_pAceInterrupts[i].pHandler(g_pCustom, s_pAceInterrupts[i].pData);
+			handled |= bit;
 		}
+	}
+	if(handled) {
+		/* The native level handlers acknowledge requests after callbacks. */
+		g_pCustom->intreq = handled;
+		chipsetSyncCpuWrites();
 	}
 	/* CIA-B timer A/B → EXTER */
 	if((uwPending & INTF_EXTER) || 1) {

@@ -4,6 +4,8 @@ ace\.code-workspace
 
 build/
 build-host/
+build-host-dist/
+dist/
 lib/
 bin/
 
@@ -19,3 +21,4 @@ tools/build-*/
 
 showcase/NUL
 tools/build-local/*
+build-host-aga/*

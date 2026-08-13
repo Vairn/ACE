@@ -53,7 +53,7 @@ static ULONG s_sprPtr[8];
 static int s_sprArmed[8];
 static int s_sprActive[8];
 static UWORD s_sprPos[8], s_sprCtl[8];
-static UWORD s_sprDatA[8], s_sprDatB[8];
+static UWORD s_sprDatA[8][4], s_sprDatB[8][4];
 static int s_sprX[8], s_sprY0[8], s_sprY1[8], s_sprAttach[8];
 
 static UWORD s_lastBltsize, s_lastCopjmp1, s_lastCopjmp2;
@@ -246,6 +246,12 @@ static void startBlit(UWORD uwSize) {
 	blitterStart(uwSize);
 }
 
+static void startBlitEcs(UWORD uwHeight, UWORD uwWidth) {
+	int height = (int)(uwHeight & 0x7FFF);
+	int width = (int)(uwWidth & 0x07FF);
+	blitterStartWH(height ? height : 32768, width ? width : 2048);
+}
+
 static int customPtrRegBase(UWORD uwOffs, UWORD *pBase) {
 	static const UWORD kPtr[] = {
 		offsetof(struct Custom, dskpt),
@@ -333,6 +339,10 @@ static void customWriteUword(UWORD uwOffs, UWORD uwVal) {
 			s_lastBltsize = uwVal;
 			g_pHostCustom->bltsize = 0;
 			break;
+		case 0x05E: /* BLTSIZH — ECS strobe; size from BLTSIZV + this write */
+			startBlitEcs(g_pHostCustom->bltsizv, uwVal);
+			g_pHostCustom->bltsizh = 0;
+			break;
 		case 0x088: /* COPJMP1 */
 			copperJump(g_pHostCustom->cop1lc);
 			g_pHostCustom->copjmp1 = 0;
@@ -378,6 +388,10 @@ void chipsetSyncCpuWrites(void) {
 		startBlit(c->bltsize);
 		s_lastBltsize = c->bltsize;
 		c->bltsize = 0;
+	}
+	if(c->bltsizh) {
+		startBlitEcs(c->bltsizv, c->bltsizh);
+		c->bltsizh = 0;
 	}
 	if(c->copjmp1) {
 		copperJump(c->cop1lc);
@@ -684,6 +698,26 @@ static UWORD colorLookup(int idx) {
 	return rgbFrom12(s_colorHi[idx], s_colorLo[idx]);
 }
 
+static int sprFetchWords(void) {
+#ifdef ACE_USE_AGA_FEATURES
+	switch((g_pHostCustom->fmode >> 2) & 3) {
+		case 1:
+		case 2:
+			return 2;
+		case 3:
+			return 4;
+		default:
+			return 1;
+	}
+#else
+	return 1;
+#endif
+}
+
+static int sprWidthPx(void) {
+	return sprFetchWords() * 16;
+}
+
 static void spriteFetchCtl(int ch) {
 	/* ACE writes POS/CTL as native UWORDs; CHIP DMA pixels stay Amiga BE. */
 	UWORD *p = (UWORD *)(uintptr_t)s_sprPtr[ch];
@@ -701,17 +735,26 @@ static void spriteFetchCtl(int ch) {
 	s_sprActive[ch] = 0;
 }
 
-static void spriteFetchData(int ch) {
-	s_sprDatA[ch] = readChipWord(s_sprPtr[ch]);
-	s_sprDatB[ch] = readChipWord(s_sprPtr[ch] + 2);
-	s_sprPtr[ch] += 4;
+static void spriteFetchDataSlot(int ch, int phase) {
+	int i, nw = sprFetchWords();
+	UWORD *pDst = phase ? s_sprDatB[ch] : s_sprDatA[ch];
+	if(!phase) {
+		for(i = 0; i < 4; ++i) {
+			s_sprDatA[ch][i] = 0;
+			s_sprDatB[ch][i] = 0;
+		}
+	}
+	for(i = 0; i < nw; ++i) {
+		pDst[i] = readChipWord(s_sprPtr[ch]);
+		s_sprPtr[ch] += 2;
+	}
 	g_pHostCustom->sprpt[ch] = (APTR)s_sprPtr[ch];
 }
 
 static int spritePixel(int x, int *pColor, int *pPri) {
 	int ch, bestPri = 99, found = 0, col = 0;
 	for(ch = 0; ch < 8; ++ch) {
-		int sx, bit, two;
+		int sx, two;
 		if(!s_sprActive[ch]) {
 			continue;
 		}
@@ -719,26 +762,30 @@ static int spritePixel(int x, int *pColor, int *pPri) {
 			continue;
 		}
 		sx = s_sprX[ch];
-		if(x < sx || x >= sx + 16) {
+		if(x < sx || x >= sx + sprWidthPx()) {
 			continue;
 		}
-		bit = 15 - (x - sx);
-		two = 0;
-		if(s_sprDatA[ch] & (1u << bit)) {
-			two |= 1;
-		}
-		if(s_sprDatB[ch] & (1u << bit)) {
-			two |= 2;
-		}
-		if((ch + 1) < 8 && s_sprAttach[ch + 1] && s_sprActive[ch + 1]) {
-			int t2 = 0;
-			if(s_sprDatA[ch + 1] & (1u << bit)) {
-				t2 |= 1;
+		{
+			int off = x - sx;
+			int word = off / 16;
+			int bit = 15 - (off & 15);
+			two = 0;
+			if(s_sprDatA[ch][word] & (1u << bit)) {
+				two |= 1;
 			}
-			if(s_sprDatB[ch + 1] & (1u << bit)) {
-				t2 |= 2;
+			if(s_sprDatB[ch][word] & (1u << bit)) {
+				two |= 2;
 			}
-			two |= t2 << 2;
+			if((ch + 1) < 8 && s_sprAttach[ch + 1] && s_sprActive[ch + 1]) {
+				int t2 = 0;
+				if(s_sprDatA[ch + 1][word] & (1u << bit)) {
+					t2 |= 1;
+				}
+				if(s_sprDatB[ch + 1][word] & (1u << bit)) {
+					t2 |= 2;
+				}
+				two |= t2 << 2;
+			}
 		}
 		if(two) {
 			int pri = ch >> 1;
@@ -812,8 +859,9 @@ static void renderSlotPixels(void) {
 		}
 		rgb = colorLookup(idx);
 		if((s_uwDmacon & DMAF_SPRITE) && spritePixel(hxLores, &sprCol, &sprPri)) {
-			(void)sprPri;
-			if(sprCol) {
+			int pfPri = (int)(g_pHostCustom->bplcon2 & 7);
+			int sprInFront = (sprPri < pfPri) || idx == 0;
+			if(sprCol && sprInFront) {
 				rgb = colorLookup(sprCol);
 			}
 		}
@@ -874,7 +922,10 @@ static void endLine(void) {
 	if((s_uwDmacon & DMAF_RASTER) && s_bplFetchIdx) {
 		endOfLineModulo();
 	}
-	paulaLineTick();
+	paulaLineTick(
+		s_lines * (s_isPal ? 50 : 60),
+		s_isPal ? 3546895u : 3579545u
+	);
 }
 
 static void runOneSlot(void) {
@@ -882,6 +933,7 @@ static void runOneSlot(void) {
 	int used = 0;
 	tAceHostDmaKind kind = ACE_HOST_DMA_IDLE;
 	int sprCh;
+	int sprPhase;
 	int period;
 
 	if(++s_eClockAcc >= 5) {
@@ -904,12 +956,13 @@ static void runOneSlot(void) {
 	}
 
 	sprCh = spriteSlotChannel(h);
+	sprPhase = sprCh >= 0 ? (int)((h - 0x15) & 1) : 0;
 	if(!used && sprCh >= 0 && (s_uwDmacon & DMAF_SPRITE) && (s_uwDmacon & DMAF_MASTER)) {
-		if(!s_sprArmed[sprCh] && s_sprPtr[sprCh]) {
+		if(!s_sprArmed[sprCh] && s_sprPtr[sprCh] && !sprPhase) {
 			spriteFetchCtl(sprCh);
 		}
 		else if(s_sprActive[sprCh]) {
-			spriteFetchData(sprCh);
+			spriteFetchDataSlot(sprCh, sprPhase);
 		}
 		kind = ACE_HOST_DMA_SPRITE;
 		used = 1;
@@ -1117,6 +1170,9 @@ void chipsetInjectKey(UBYTE ubRawKey) {
 
 void chipsetRaiseInt(UWORD uwMask) {
 	s_uwIntreq |= uwMask;
+	if(g_pHostCustom) {
+		g_pHostCustom->intreqr = s_uwIntreq;
+	}
 }
 
 void chipsetSetTimingLog(int on) {
@@ -1183,10 +1239,39 @@ void chipsetCopperDisasm(char *pBuf, unsigned bufSize, unsigned maxInsns) {
 			}
 		}
 		else {
-			off += (unsigned)snprintf(
-				pBuf + off, bufSize - off, "MOVE %03X,%04X\n",
-				uwIr1 & 0x1FE, uwIr2
-			);
+			static const char *kReg[] = {
+				0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+				0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+				"BLTCON0","BLTCON1","BLTAFWM","BLTALWM",
+				"BLTCPTH","BLTCPTL","BLTBPTH","BLTBPTL","BLTAPTH","BLTAPTL",
+				"BLTDPTH","BLTDPTL","BLTSIZE","BLTCON0L","BLTSIZV","BLTSIZH"
+			};
+			UWORD dest = (UWORD)(uwIr1 & 0x1FE);
+			const char *nm = 0;
+			if((dest >> 1) < (UWORD)(sizeof(kReg)/sizeof(kReg[0]))) {
+				nm = kReg[dest >> 1];
+			}
+			if(!nm) {
+				if(dest >= 0x180 && dest <= 0x1BE) {
+					nm = "COLOR";
+				}
+				else if(dest >= 0x0E0 && dest <= 0x0FC) {
+					nm = "BPLxPT";
+				}
+				else if(dest >= 0x120 && dest <= 0x13C) {
+					nm = "SPRxPT";
+				}
+			}
+			if(nm) {
+				off += (unsigned)snprintf(
+					pBuf + off, bufSize - off, "MOVE %s,%04X\n", nm, uwIr2
+				);
+			}
+			else {
+				off += (unsigned)snprintf(
+					pBuf + off, bufSize - off, "MOVE %03X,%04X\n", dest, uwIr2
+				);
+			}
 		}
 		pc += 4;
 		n++;

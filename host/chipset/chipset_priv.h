@@ -16,6 +16,7 @@ extern tCia *g_pHostCia[2];
 
 void blitterInit(void);
 void blitterStart(UWORD uwBltSize);
+void blitterStartWH(int height, int width);
 void blitterUseSlot(void);
 int blitterBusy(void);
 void blitterFinishNow(void);
@@ -33,7 +34,7 @@ void paulaShutdown(void);
 void paulaDmaSlot(int ch);
 void paulaMix(short *pOut, int nFrames);
 void paulaOnDmaEnable(UWORD uwOld, UWORD uwNew);
-void paulaLineTick(void);
+void paulaLineTick(int lineRate, ULONG paulaClock);
 
 void aceHostDispatchInts(UWORD uwPending);
 void aceHostFireCia(UBYTE ubCia, UBYTE ubBit);

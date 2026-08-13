@@ -5,7 +5,7 @@
 #include <ace/utils/tag.h>
 #include <ace/managers/log.h>
 
-ULONG tagGet(void *pTagListPtr, va_list vaSrcList, tTag ulTagToFind, ULONG ulOnNotFound) {
+tTagValue tagGet(void *pTagListPtr, va_list vaSrcList, tTag ulTagToFind, tTagValue ulOnNotFound) {
 	if(pTagListPtr) {
 		// TODO
 		logWrite("ERR: Unimplemented in tagFindString()");
@@ -18,15 +18,15 @@ ULONG tagGet(void *pTagListPtr, va_list vaSrcList, tTag ulTagToFind, ULONG ulOnN
 	do {
 		ulTagName = va_arg(vaWorkList, tTag);
 		if(ulTagName == ulTagToFind) {
-			ULONG ulOut = va_arg(vaWorkList, ULONG);
+			tTagValue ulOut = va_arg(vaWorkList, tTagValue);
 			va_end(vaWorkList);
 			return ulOut;
 		}
 		else if(ulTagName == TAG_SKIP) {
 			// Ignore this & next
-			va_arg(vaWorkList, ULONG);
-			va_arg(vaWorkList, ULONG);
-			va_arg(vaWorkList, ULONG);
+			va_arg(vaWorkList, tTagValue);
+			va_arg(vaWorkList, tTagValue);
+			va_arg(vaWorkList, tTagValue);
 		}
 		else if(ulTagName == TAG_MORE) {
 			// This list is finished - parse next one
@@ -35,7 +35,7 @@ ULONG tagGet(void *pTagListPtr, va_list vaSrcList, tTag ulTagToFind, ULONG ulOnN
 			return tagGet(pNext, 0, ulTagToFind, ulOnNotFound);
 		}
 		else {
-			va_arg(vaWorkList, ULONG);
+			va_arg(vaWorkList, tTagValue);
 		}
 	} while(ulTagName != TAG_DONE);
 	va_end(vaWorkList);

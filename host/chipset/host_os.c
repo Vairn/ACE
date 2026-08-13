@@ -88,8 +88,20 @@ int hostOsIsDir(const char *path) {
 #endif
 }
 
+/* AllocMem/FreeMem without exec headers — windows.h typedefs BOOL. */
+extern uint32_t AllocMem(uint32_t byteSize, uint32_t attributes);
+extern void FreeMem(uint32_t memoryBlock, uint32_t byteSize);
+#ifndef MEMF_ANY
+#define MEMF_ANY 0L
+#endif
+#ifndef MEMF_CLEAR
+#define MEMF_CLEAR (1L << 16)
+#endif
+
 void *hostOsDirOpen(const char *path) {
-	tOsDir *p = (tOsDir *)calloc(1, sizeof(tOsDir));
+	tOsDir *p = (tOsDir *)(uintptr_t)AllocMem(
+		(uint32_t)sizeof(tOsDir), (uint32_t)(MEMF_ANY | MEMF_CLEAR)
+	);
 	if(!p) {
 		return 0;
 	}
@@ -100,14 +112,14 @@ void *hostOsDirOpen(const char *path) {
 		p->h = FindFirstFileA(pat, &p->fd);
 		p->first = (p->h != INVALID_HANDLE_VALUE);
 		if(p->h == INVALID_HANDLE_VALUE) {
-			free(p);
+			FreeMem((uint32_t)(uintptr_t)p, (uint32_t)sizeof(tOsDir));
 			return 0;
 		}
 	}
 #else
 	p->pDir = opendir(path);
 	if(!p->pDir) {
-		free(p);
+		FreeMem((uint32_t)(uintptr_t)p, (uint32_t)sizeof(tOsDir));
 		return 0;
 	}
 #endif
@@ -128,7 +140,7 @@ void hostOsDirClose(void *dir) {
 		closedir(p->pDir);
 	}
 #endif
-	free(p);
+	FreeMem((uint32_t)(uintptr_t)p, (uint32_t)sizeof(tOsDir));
 }
 
 int hostOsDirNext(void *dir, char *name, unsigned nameMax, int *isDir, long *size) {
@@ -188,3 +200,65 @@ int hostOsMkdir(const char *path) {
 	return errno == EEXIST;
 #endif
 }
+
+#ifdef _WIN32
+void *hostOsHeapMalloc(size_t n) {
+	if(!n) {
+		n = 1;
+	}
+	return HeapAlloc(GetProcessHeap(), 0, n);
+}
+
+void *hostOsHeapCalloc(size_t nmemb, size_t size) {
+	size_t n;
+	if(size && nmemb > ((size_t)-1) / size) {
+		return 0;
+	}
+	n = nmemb * size;
+	if(!n) {
+		n = 1;
+	}
+	return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, n);
+}
+
+void *hostOsHeapRealloc(void *p, size_t n) {
+	if(!p) {
+		return hostOsHeapMalloc(n);
+	}
+	if(!n) {
+		hostOsHeapFree(p);
+		return 0;
+	}
+	return HeapReAlloc(GetProcessHeap(), 0, p, n);
+}
+
+void hostOsHeapFree(void *p) {
+	if(p) {
+		HeapFree(GetProcessHeap(), 0, p);
+	}
+}
+#else
+void *__real_malloc(size_t n);
+void *__real_calloc(size_t nmemb, size_t size);
+void *__real_realloc(void *p, size_t n);
+void __real_free(void *p);
+
+void *hostOsHeapMalloc(size_t n) {
+	if(!n) {
+		n = 1;
+	}
+	return __real_malloc(n);
+}
+
+void *hostOsHeapCalloc(size_t nmemb, size_t size) {
+	return __real_calloc(nmemb, size);
+}
+
+void *hostOsHeapRealloc(void *p, size_t n) {
+	return __real_realloc(p, n);
+}
+
+void hostOsHeapFree(void *p) {
+	__real_free(p);
+}
+#endif

@@ -19,6 +19,13 @@ cmake --build build-host --parallel
 
 Run from the build directory so data/ is found: cd build-host && ./showcase.exe
 
+Distribute folder (Release, no ACE log spam, SDL2.dll + data/ + zip):
+
+cmake -S showcase -B build-host-dist -G Ninja -DACE_HOST=ON -DACE_DEBUG=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/msys64/ucrt64
+cmake --build build-host-dist --target dist --parallel
+
+Output: dist/showcase-host/ and dist/showcase-host.zip
+
 Asset conversion runs when ACE tools are present in tools/bin/:
 
 cmake -S tools -B tools/build-host -G Ninja
@@ -35,11 +42,14 @@ Amiga cross builds are unchanged: leave ACE_HOST off. Without AMIGA or ACE_HOST,
 - ACE_HOST_MEM_MODE: STRICT (fail at cap) or VIRTUAL (grow with OVER warnings)
 - ACE_HOST_CHIP_SIZE / ACE_HOST_FAST_SIZE: CUSTOM machine sizes in bytes
 - ACE_HOST_DEBUG (ON): on-screen HUD
+- ACE_HOST_USE_VIRTUAL_JOYSTICK (OFF): WASD / numpad / SDL gamepad → JOY1DAT (port 2) + FIR1. Arrows stay CIA keys so menu `keyUse || joyUse` does not double-step. Ctrl/Z fire, Alt/X fire2. Gamepads hotplug; first SDL GameController maps to JOY1.
 - ACE_DEBUG: ACE log/safety checks
 
 ## Keys
 
-F10 toggle timing log (also `ACE_HOST_TIMING=1`), F11 memory HUD, F12 DMA/copper overlay, arrows+Ctrl for JOY1DAT (port 2). Mouse moves JOY0DAT (port 1); LMB/RMB/MMB map to CIA FIR0 / POTINP.
+F10 toggle timing log (also `ACE_HOST_TIMING=1`), F11 memory HUD (needs ACE_HOST_DEBUG), F12 DMA/copper/alloc overlay. Mouse moves JOY0DAT (port 1); LMB/RMB/MMB map to CIA FIR0 / POTINP.
+
+With `-DACE_HOST_USE_VIRTUAL_JOYSTICK=ON`: WASD or numpad 8462 drive JOY1DAT; arrows remain keyboard. Plug/unplug a gamepad at any time.
 
 Keyboard goes through CIA-A SDR + SPMODE handshake so ACE `key.c` `onKeyInterrupt` runs (3-scanline wait via `getRayPos()`).
 

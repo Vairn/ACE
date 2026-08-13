@@ -159,12 +159,26 @@ static void bar(UWORD *fb, int w, int h, int x, int y, int bw, int bh, ULONG use
 }
 
 void aceHostHudDraw(UWORD *pFb, int width, int height) {
+#ifdef ACE_HOST_DEBUG
 	char line[128];
-	UWORD white = 0xFFFF, red = 0xF800, yellow = 0xFFE0;
+	UWORD white = 0xFFFF, red = 0xF800, yellow = 0xFFE0, cyan = 0x07FF;
 	int y = 1;
 	ULONG chipU = aceHostChipUsed(), chipB = aceHostChipBudget();
 	ULONG fastU = aceHostFastUsed(), fastB = aceHostFastBudget();
+	ULONG chipP = aceHostChipPeak(), fastP = aceHostFastPeak();
+	ULONG chipF = aceHostChipLargestFree(), fastF = aceHostFastLargestFree();
 	int over = aceHostChipOverBudget() || aceHostFastOverBudget();
+	static int s_bannerFrames;
+
+	if(aceHostOverBudgetBanner()) {
+		drawStr(pFb, width, height, 2, y, "OVER BUDGET", red);
+		y += 8;
+		s_bannerFrames++;
+		if(s_bannerFrames > 150) {
+			aceHostClearOverBudgetBanner();
+			s_bannerFrames = 0;
+		}
+	}
 
 	snprintf(line, sizeof(line), "%s %s",
 		aceHostMachineName(),
@@ -172,21 +186,25 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 	drawStr(pFb, width, height, 2, y, line, white);
 	y += 8;
 
-	snprintf(line, sizeof(line), "CHIP %lu/%luK",
-		(unsigned long)(chipU / 1024u), (unsigned long)(chipB / 1024u));
+	snprintf(line, sizeof(line), "CHIP %lu/%luK PK%luK FR%luK",
+		(unsigned long)(chipU / 1024u), (unsigned long)(chipB / 1024u),
+		(unsigned long)(chipP / 1024u), (unsigned long)(chipF / 1024u));
 	drawStr(pFb, width, height, 2, y, line, over && aceHostChipOverBudget() ? red : white);
-	bar(pFb, width, height, 140, y, 80, 7, chipU, chipB ? chipB : 1, aceHostChipOverBudget());
+	bar(pFb, width, height, 280, y, 80, 7, chipU, chipB ? chipB : 1, aceHostChipOverBudget());
 	y += 8;
 
-	snprintf(line, sizeof(line), "FAST %lu/%luK",
-		(unsigned long)(fastU / 1024u), (unsigned long)(fastB / 1024u));
+	snprintf(line, sizeof(line), "FAST %lu/%luK PK%luK FR%luK",
+		(unsigned long)(fastU / 1024u), (unsigned long)(fastB / 1024u),
+		(unsigned long)(fastP / 1024u), (unsigned long)(fastF / 1024u));
 	drawStr(pFb, width, height, 2, y, line, aceHostFastOverBudget() ? red : white);
-	bar(pFb, width, height, 140, y, 80, 7, fastU, fastB ? fastB : 1, aceHostFastOverBudget());
+	bar(pFb, width, height, 280, y, 80, 7, fastU, fastB ? fastB : 1, aceHostFastOverBudget());
 	y += 8;
 
 	if(over) {
 		LONG dChip = (LONG)chipU - (LONG)chipB;
-		snprintf(line, sizeof(line), "OVER +%ldK", (long)(dChip > 0 ? dChip / 1024 : ((LONG)fastU - (LONG)fastB) / 1024));
+		LONG dFast = (LONG)fastU - (LONG)fastB;
+		LONG d = dChip > 0 ? dChip : dFast;
+		snprintf(line, sizeof(line), "OVER +%ldK", (long)(d / 1024));
 		drawStr(pFb, width, height, 2, y, line, red);
 		y += 8;
 	}
@@ -206,6 +224,8 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 	if(aceHostHudFull()) {
 		const UBYTE *dma = chipsetLastLineDma();
 		int i;
+		unsigned nalloc, ai;
+		ULONG chipSz = aceHostChipSize();
 		y += 10;
 		drawStr(pFb, width, height, 2, y, "DMA", white);
 		y += 8;
@@ -223,10 +243,64 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 			plotHud(pFb, width, height, 2 + i, y, col);
 			plotHud(pFb, width, height, 2 + i, y + 1, col);
 		}
+		y += 4;
+		drawStr(pFb, width, height, 2, y, "CHIP MAP", cyan);
+		y += 8;
+		{
+			int bw = width - 8;
+			int px;
+			if(bw < 8) {
+				bw = 8;
+			}
+			if(chipSz == 0) {
+				chipSz = 1;
+			}
+			for(px = 0; px < bw; ++px) {
+				plotHud(pFb, width, height, 4 + px, y, 0x2104);
+				plotHud(pFb, width, height, 4 + px, y + 1, 0x2104);
+			}
+			nalloc = aceHostAllocCount();
+			for(ai = 0; ai < nalloc; ++ai) {
+				tAceHostAllocInfo inf;
+				if(!aceHostAllocAt(ai, &inf) || !inf.isChip) {
+					continue;
+				}
+				{
+					ULONG off = inf.ulAddr - (ULONG)(uintptr_t)aceHostBusBase();
+					int x0 = (int)(off * (ULONG)bw / chipSz);
+					int x1 = (int)((off + inf.ulSize) * (ULONG)bw / chipSz);
+					if(x0 < 0) {
+						x0 = 0;
+					}
+					if(x1 > bw) {
+						x1 = bw;
+					}
+					for(px = x0; px < x1; ++px) {
+						plotHud(pFb, width, height, 4 + px, y, 0x07E0);
+						plotHud(pFb, width, height, 4 + px, y + 1, 0x07E0);
+					}
+				}
+			}
+		}
+		y += 6;
+		drawStr(pFb, width, height, 2, y, "ALLOCS", cyan);
+		y += 8;
+		nalloc = aceHostAllocCount();
+		for(ai = 0; ai < nalloc && ai < 8 && y < height - 16; ++ai) {
+			tAceHostAllocInfo inf;
+			if(!aceHostAllocAt(ai, &inf)) {
+				break;
+			}
+			snprintf(line, sizeof(line), "%s %08lX %lu",
+				inf.isChip ? "C" : "F",
+				(unsigned long)inf.ulAddr,
+				(unsigned long)inf.ulSize);
+			drawStr(pFb, width, height, 2, y, line, white);
+			y += 8;
+		}
 		{
 			char cop[512];
 			chipsetCopperDisasm(cop, sizeof(cop), 8);
-			y += 4;
 			{
 				char *p = cop, *nl;
 				while(*p && y < height - 8) {
@@ -244,4 +318,9 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 			}
 		}
 	}
+#else
+	(void)pFb;
+	(void)width;
+	(void)height;
+#endif
 }

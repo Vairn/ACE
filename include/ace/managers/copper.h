@@ -280,7 +280,9 @@ static inline void copSetWait(tCopWaitCmd *pWaitCmd, UBYTE ubX, UBYTE ubY) {
 }
 
 static inline void copSetMove(tCopMoveCmd *pMoveCmd, volatile void *pReg, UWORD uwValue) {
-	UWORD uwDest = (UWORD)((ULONG)pReg - (ULONG)((UBYTE *)g_pCustom));
+	UWORD uwDest = (UWORD)(
+		(uintptr_t)pReg - (uintptr_t)((UBYTE *)g_pCustom)
+	);
 	copCmdWriteIr((tCopCmd *)pMoveCmd, (UWORD)(uwDest & 0x1FE), uwValue);
 }
 
@@ -298,6 +300,35 @@ static inline void copSetMoveVal(tCopMoveCmd *pMoveCmd, UWORD uwValue) {
 	pMoveCmd->bfValue = uwValue;
 }
 #endif
+
+/**
+ * @brief Set SKIP vs WAIT on an existing wait/skip instruction (second-word bit 0).
+ * Host copper lists are stored as big-endian Agnus words; do not poke bitfields.
+ */
+static inline void copSetSkipBit(tCopWaitCmd *pWaitCmd, UBYTE isSkip) {
+#ifdef ACE_HOST
+	UBYTE *b = (UBYTE *)pWaitCmd;
+	if(isSkip) {
+		b[3] |= 1;
+	}
+	else {
+		b[3] &= (UBYTE)~1;
+	}
+#else
+	pWaitCmd->bfIsSkip = isSkip;
+#endif
+}
+
+/**
+ * @brief Update only the WAIT/SKIP Y compare (high byte of the first word).
+ */
+static inline void copSetWaitY(tCopWaitCmd *pWaitCmd, UBYTE ubY) {
+#ifdef ACE_HOST
+	((UBYTE *)pWaitCmd)[0] = ubY;
+#else
+	pWaitCmd->bfWaitY = ubY;
+#endif
+}
 
 #endif // AMIGA
 

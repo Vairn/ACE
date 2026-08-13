@@ -11,8 +11,6 @@ static ULONG ptrOf(APTR a) {
 	ULONG p = aceHostIsChipAddr((ULONG)a)
 		? (ULONG)(uintptr_t)aceHostBusToPtr((ULONG)a)
 		: (ULONG)a;
-	/* Agnus DMA addresses are always even; ACE blitCopy uses x>>3, which is
-	 * odd for X in 8..15 within a word. Real hardware ignores bit 0. */
 	return p & ~(ULONG)1;
 }
 
@@ -50,10 +48,8 @@ static UWORD minterm(UWORD a, UWORD b, UWORD c, UBYTE mt) {
 	return out;
 }
 
-static void blitStandard(UWORD uwBltSize) {
+static void blitStandard(int width, int height) {
 	struct Custom *c = g_pHostCustom;
-	int width = uwBltSize & 0x3F;
-	int height = uwBltSize >> 6;
 	int useA = (c->bltcon0 & 0x0800) != 0;
 	int useB = (c->bltcon0 & 0x0400) != 0;
 	int useC = (c->bltcon0 & 0x0200) != 0;
@@ -78,6 +74,7 @@ static void blitStandard(UWORD uwBltSize) {
 	int y, x;
 	int fillCarry = 0;
 	int channels = (useA ? 1 : 0) + (useB ? 1 : 0) + (useC ? 1 : 0) + (useD ? 1 : 0);
+	LONG ms;
 	if(width == 0) {
 		width = 64;
 	}
@@ -89,14 +86,10 @@ static void blitStandard(UWORD uwBltSize) {
 		return;
 	}
 
-	/* Agnus A/B barrel shifter (WinUAE blitdofast / blitdofast_desc):
-	 *  ascending:  ((old << 16) | new) >> shift
-	 *  descending: ((new << 16) | old) >> (16 - shift)
-	 * A first/last-word masks are applied to the incoming word before the
-	 * shifter. A/B DMA off still uses BLTADAT/BLTBDAT. */
+	ms = desc ? -1 : 1;
 	for(y = 0; y < height; ++y) {
 		ULONG ra = pa, rb = pb, rc = pc, rd = pd;
-		fillCarry = (c->bltcon1 & 0x04) ? 1 : 0; /* FCI */
+		fillCarry = (c->bltcon1 & 0x04) ? 1 : 0;
 		for(x = 0; x < width; ++x) {
 			UWORD a = 0, b = 0, cw = 0, d, rawA, rawB;
 			UWORD mask = 0xFFFF;
@@ -172,21 +165,17 @@ static void blitStandard(UWORD uwBltSize) {
 				rd = (ULONG)((LONG)rd + step);
 			}
 		}
-		/* DESC: HRM — modulo is subtracted rather than added. */
-		{
-			LONG ms = desc ? -1 : 1;
-			if(useA) {
-				pa = (ULONG)((LONG)ra + ms * (LONG)amod);
-			}
-			if(useB) {
-				pb = (ULONG)((LONG)rb + ms * (LONG)bmod);
-			}
-			if(useC) {
-				pc = (ULONG)((LONG)rc + ms * (LONG)cmod);
-			}
-			if(useD) {
-				pd = (ULONG)((LONG)rd + ms * (LONG)dmod);
-			}
+		if(useA) {
+			pa = (ULONG)((LONG)ra + ms * (LONG)amod);
+		}
+		if(useB) {
+			pb = (ULONG)((LONG)rb + ms * (LONG)bmod);
+		}
+		if(useC) {
+			pc = (ULONG)((LONG)rc + ms * (LONG)cmod);
+		}
+		if(useD) {
+			pd = (ULONG)((LONG)rd + ms * (LONG)dmod);
 		}
 	}
 	c->bltapt = (APTR)pa;
@@ -196,13 +185,8 @@ static void blitStandard(UWORD uwBltSize) {
 	s_slotsLeft = height * width * (channels ? channels : 1);
 }
 
-/* HRM / WinUAE line mode: BLTCON1 LINE, SING, SUD/SUL/AUL octant, SIGN.
- * A is a walking bit from BLTADAT; B is texture (BLTBDAT); C is the source
- * word; D is written only if channel C is enabled. Width is typically 2. */
-static void blitLine(UWORD uwBltSize) {
+static void blitLine(int width, int height) {
 	struct Custom *c = g_pHostCustom;
-	int height = uwBltSize >> 6;
-	int width = uwBltSize & 0x3F;
 	int ashift = (c->bltcon0 >> 12) & 0xF;
 	int bshift = (c->bltcon1 >> 12) & 0xF;
 	int sign = (c->bltcon1 & SIGNFLAG) != 0;
@@ -235,7 +219,6 @@ static void blitLine(UWORD uwBltSize) {
 		width = 64;
 	}
 
-	/* WinUAE start: rotate BLTBDAT by TEXTURE shift, pixel from bit 0. */
 	blineb = (UWORD)((bdat >> bshift) | (bdat << ((16 - bshift) & 15)));
 	if(bshift == 0) {
 		blineb = bdat;
@@ -248,7 +231,6 @@ static void blitLine(UWORD uwBltSize) {
 
 		onedot = 1;
 
-		/* APT: 4*dmin / 4*(dmin-dmax) error accumulator (WinUAE proc_apt). */
 		if(useA) {
 			apt += oldSign ? (LONG)bmod : (LONG)amod;
 		}
@@ -262,7 +244,6 @@ static void blitLine(UWORD uwBltSize) {
 		chold = useC ? r16(pc) : 0;
 		d = minterm(ahold, bhold, chold, mt);
 
-		/* X step uses the pre-update SIGN flag (WinUAE proc_cpt_x). */
 		if(width > 1) {
 			if(!oldSign && !sud) {
 				if(sul) {
@@ -297,7 +278,6 @@ static void blitLine(UWORD uwBltSize) {
 		ashift = (ashift + ovf) & 15;
 		ovf = 0;
 
-		/* Y step after ASH wrap (WinUAE proc_cpt_y). */
 		if(width >= 2) {
 			if(!oldSign && sud) {
 				pc = (ULONG)((LONG)pc + (sul ? -(LONG)cmod : (LONG)cmod));
@@ -316,7 +296,6 @@ static void blitLine(UWORD uwBltSize) {
 			blineb = bdat;
 		}
 
-		/* D-channel state has no effect; C must be enabled or nothing is drawn. */
 		if(plot && useC) {
 			w16(pd, d);
 		}
@@ -329,7 +308,6 @@ static void blitLine(UWORD uwBltSize) {
 	c->bltcon0 = (UWORD)((c->bltcon0 & 0x0FFF) | (ashift << 12));
 	c->bltcon1 = (UWORD)((c->bltcon1 & 0x0FFF & (UWORD)~SIGNFLAG) |
 		(bshift << 12) | (sign ? SIGNFLAG : 0));
-	/* Line: C read + D write per pixel (A is not DMA). */
 	s_slotsLeft = height * 2;
 }
 
@@ -340,13 +318,17 @@ void blitterInit(void) {
 }
 
 void blitterStart(UWORD uwBltSize) {
+	blitterStartWH((int)(uwBltSize >> 6), (int)(uwBltSize & 0x3F));
+}
+
+void blitterStartWH(int height, int width) {
 	s_lineMode = (g_pHostCustom->bltcon1 & 1) != 0;
 	s_busy = 1;
 	if(s_lineMode) {
-		blitLine(uwBltSize);
+		blitLine(width, height);
 	}
 	else {
-		blitStandard(uwBltSize);
+		blitStandard(width, height);
 	}
 	if(s_slotsLeft < 1) {
 		s_slotsLeft = 1;

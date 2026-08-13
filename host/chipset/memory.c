@@ -6,7 +6,7 @@
 #include <string.h>
 
 #define ALIGN8(n) (((n) + 7u) & ~7u)
-#define MAX_ALLOCS 4096
+#define MAX_SPANS 4096
 
 typedef struct tSpan {
 	ULONG ulOffs;
@@ -38,11 +38,39 @@ static int s_isOverBanner;
 static int s_isChipOver;
 static int s_isFastOver;
 
-static tSpan *spanAlloc(ULONG ulOffs, ULONG ulSize, ULONG ulFlags) {
-	tSpan *p = (tSpan *)malloc(sizeof(tSpan));
+static tSpan s_spans[MAX_SPANS];
+static tSpan *s_spanFree;
+static int s_spanInited;
+
+static void spanPoolInit(void) {
+	unsigned i;
+	for(i = 0; i < MAX_SPANS - 1; ++i) {
+		s_spans[i].pNext = &s_spans[i + 1];
+	}
+	s_spans[MAX_SPANS - 1].pNext = 0;
+	s_spanFree = s_spans;
+	s_spanInited = 1;
+}
+
+static void spanRelease(tSpan *p) {
 	if(!p) {
+		return;
+	}
+	p->pNext = s_spanFree;
+	s_spanFree = p;
+}
+
+static tSpan *spanAlloc(ULONG ulOffs, ULONG ulSize, ULONG ulFlags) {
+	tSpan *p;
+	if(!s_spanInited) {
+		spanPoolInit();
+	}
+	p = s_spanFree;
+	if(!p) {
+		fprintf(stderr, "[ACE_HOST] ERR: allocator span slab exhausted\n");
 		return 0;
 	}
+	s_spanFree = p->pNext;
 	p->ulOffs = ulOffs;
 	p->ulSize = ulSize;
 	p->ulFlags = ulFlags;
@@ -54,7 +82,7 @@ static void spanFreeList(tSpan **pp) {
 	while(*pp) {
 		tSpan *p = *pp;
 		*pp = p->pNext;
-		free(p);
+		spanRelease(p);
 	}
 }
 
@@ -69,7 +97,7 @@ static void insertFreeSorted(tPool *pPool, tSpan *pNew) {
 		tSpan *pN = pNew->pNext;
 		pNew->ulSize += pN->ulSize;
 		pNew->pNext = pN->pNext;
-		free(pN);
+		spanRelease(pN);
 	}
 	if(pp != &pPool->pFree) {
 		tSpan *pPrev = pPool->pFree;
@@ -79,7 +107,7 @@ static void insertFreeSorted(tPool *pPool, tSpan *pNew) {
 		if(pPrev->ulOffs + pPrev->ulSize == pNew->ulOffs) {
 			pPrev->ulSize += pNew->ulSize;
 			pPrev->pNext = pNew->pNext;
-			free(pNew);
+			spanRelease(pNew);
 		}
 	}
 }
@@ -111,6 +139,10 @@ static void poolInit(tPool *pPool, UBYTE *pBase, ULONG ulSize, ULONG ulBudget, i
 	pPool->isChip = isChip;
 	pPool->isDma = isDma;
 	pPool->pFree = spanAlloc(0, ulSize, 0);
+	if(!pPool->pFree) {
+		fprintf(stderr, "[ACE_HOST] ERR: pool init failed\n");
+		exit(1);
+	}
 }
 
 static int growPool(tPool *pPool, ULONG ulNeed) {
@@ -124,7 +156,13 @@ static int growPool(tPool *pPool, ULONG ulNeed) {
 	if(ulNew <= pPool->ulSize) {
 		return 0;
 	}
-	insertFreeSorted(pPool, spanAlloc(pPool->ulSize, ulNew - pPool->ulSize, 0));
+	{
+		tSpan *pNew = spanAlloc(pPool->ulSize, ulNew - pPool->ulSize, 0);
+		if(!pNew) {
+			return 0;
+		}
+		insertFreeSorted(pPool, pNew);
+	}
 	pPool->ulSize = ulNew;
 	return 1;
 }
@@ -152,7 +190,7 @@ static void *poolAlloc(tPool *pPool, ULONG ulSize, ULONG ulFlags) {
 		ULONG ulOffs = p->ulOffs;
 		if(p->ulSize == ulNeed) {
 			*pp = p->pNext;
-			free(p);
+			spanRelease(p);
 		}
 		else {
 			p->ulOffs += ulNeed;
@@ -160,6 +198,9 @@ static void *poolAlloc(tPool *pPool, ULONG ulSize, ULONG ulFlags) {
 		}
 		{
 			tSpan *pA = spanAlloc(ulOffs, ulNeed, ulFlags);
+			if(!pA) {
+				return 0;
+			}
 			pA->pNext = pPool->pAlloc;
 			pPool->pAlloc = pA;
 		}
@@ -244,6 +285,7 @@ void aceHostMemInit(
 	s_isOverBanner = 0;
 	s_isChipOver = 0;
 	s_isFastOver = 0;
+	spanPoolInit();
 
 	switch(eMachine) {
 		case ACE_HOST_MACHINE_A500:
@@ -298,11 +340,8 @@ void aceHostMemInit(
 		else {
 			void *pFast = mapLow(ulFastMap);
 			if(!pFast) {
-				pFast = malloc(ulFastMap);
-				if(!pFast) {
-					fprintf(stderr, "[ACE_HOST] ERR: FAST pool alloc failed\n");
-					exit(1);
-				}
+				fprintf(stderr, "[ACE_HOST] ERR: FAST pool mapping failed\n");
+				exit(1);
 			}
 			memset(pFast, 0, ulFastMap);
 			poolInit(&s_sFast, (UBYTE *)pFast, ulFast ? ulFast : 0, ulFast, 0, 0);

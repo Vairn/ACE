@@ -1,6 +1,7 @@
 #include "chipset_priv.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 #define PAULA_RATE 28867 /* PAL Paula mix rate ~ CCK/123 */
 #define RING 8192
@@ -8,23 +9,38 @@
 typedef struct tChan {
 	ULONG ptr;
 	ULONG start;
-	UWORD len;
+	ULONG len;
 	UWORD per;
 	UWORD vol;
-	UWORD remain;
-	int periodAcc;
+	ULONG remain;
+	uint64_t periodPhase;
 	int dmaDelay;
-	int16_t samp;
+	int16_t samp[2];
+	int16_t next[2];
+	int sampIdx;
+	int hasCurrent;
+	int hasNext;
+	int needFetch;
 	int on;
 } tChan;
 
 static tChan s_ch[4];
-static int16_t s_ring[RING];
+static int16_t s_ringL[RING];
+static int16_t s_ringR[RING];
 static unsigned s_rHead, s_rTail;
 static int s_mixAcc;
 
 static ULONG ptrOf(APTR a) {
 	return (ULONG)a ? (ULONG)(uintptr_t)aceHostBusToPtr((ULONG)a) : 0;
+}
+
+static UWORD readBe16(ULONG p) {
+	const UBYTE *b;
+	if(!p) {
+		return 0;
+	}
+	b = (const UBYTE *)(uintptr_t)p;
+	return (UWORD)((b[0] << 8) | b[1]);
 }
 
 void paulaInit(void) {
@@ -41,14 +57,19 @@ void paulaOnDmaEnable(UWORD uwOld, UWORD uwNew) {
 	for(i = 0; i < 4; ++i) {
 		UWORD bit = (UWORD)(DMAF_AUD0 << i);
 		if((uwNew & bit) && !(uwOld & bit)) {
-			/* ptplayer waits ~576 CIA ticks before enabling DMA. */
 			s_ch[i].dmaDelay = 1;
 			s_ch[i].start = ptrOf(g_pHostCustom->aud[i].ac_ptr);
 			s_ch[i].ptr = s_ch[i].start;
-			s_ch[i].len = g_pHostCustom->aud[i].ac_len;
+			s_ch[i].len = g_pHostCustom->aud[i].ac_len ?
+				g_pHostCustom->aud[i].ac_len : 65536u;
 			s_ch[i].remain = s_ch[i].len;
 			s_ch[i].per = g_pHostCustom->aud[i].ac_per;
 			s_ch[i].vol = g_pHostCustom->aud[i].ac_vol;
+			s_ch[i].periodPhase = 0;
+			s_ch[i].sampIdx = 0;
+			s_ch[i].hasCurrent = 0;
+			s_ch[i].hasNext = 0;
+			s_ch[i].needFetch = 1;
 			s_ch[i].on = 1;
 		}
 		if(!(uwNew & bit)) {
@@ -59,6 +80,7 @@ void paulaOnDmaEnable(UWORD uwOld, UWORD uwNew) {
 
 void paulaDmaSlot(int ch) {
 	tChan *p = &s_ch[ch];
+	UWORD word;
 	if(!p->on) {
 		return;
 	}
@@ -68,82 +90,147 @@ void paulaDmaSlot(int ch) {
 		p->dmaDelay = 0;
 		return;
 	}
+	if(!p->needFetch) {
+		return;
+	}
 	if(p->remain == 0) {
 		p->start = ptrOf(g_pHostCustom->aud[ch].ac_ptr);
-		p->len = g_pHostCustom->aud[ch].ac_len;
+		p->len = g_pHostCustom->aud[ch].ac_len ?
+			g_pHostCustom->aud[ch].ac_len : 65536u;
 		p->ptr = p->start;
 		p->remain = p->len;
-		/* AUDx interrupt */
+		/* Sample DMA finished — ptplayer isChannelDone() polls this bit. */
+		chipsetRaiseInt((UWORD)(INTF_AUD0 << ch));
 	}
-	if(p->ptr) {
-		const UBYTE *b = (const UBYTE *)(uintptr_t)p->ptr;
-		p->samp = (int16_t)(int8_t)b[0];
-		p->ptr++;
-		if((p->remain) && (--p->remain == 0)) {
-			/* loop: next DMA loc already programmed by ptplayer IRQ */
-		}
+	if(!p->remain) {
+		return;
 	}
+	word = readBe16(p->ptr);
+	if(!p->hasCurrent) {
+		p->samp[0] = (int16_t)(int8_t)(word >> 8);
+		p->samp[1] = (int16_t)(int8_t)(word & 0xFF);
+		p->sampIdx = 0;
+		p->hasCurrent = 1;
+		/* Paula has a second word buffer; request it at the next DMA slot. */
+		p->needFetch = 1;
+	}
+	else {
+		p->next[0] = (int16_t)(int8_t)(word >> 8);
+		p->next[1] = (int16_t)(int8_t)(word & 0xFF);
+		p->hasNext = 1;
+		p->needFetch = 0;
+	}
+	p->ptr += 2;
+	--p->remain;
 }
 
-static void pushSample(int16_t s) {
+static void pushSample(int16_t l, int16_t r) {
 	unsigned next = (s_rHead + 1) % RING;
 	if(next == s_rTail) {
 		return;
 	}
-	s_ring[s_rHead] = s;
+	s_ringL[s_rHead] = l;
+	s_ringR[s_rHead] = r;
 	s_rHead = next;
 }
 
+static int chanSample(int i) {
+	int v = s_ch[i].vol > 64 ? 64 : (int)s_ch[i].vol;
+	if(!s_ch[i].hasCurrent) {
+		return 0;
+	}
+	int s = s_ch[i].samp[s_ch[i].sampIdx & 1];
+	return s * v;
+}
+
 void paulaMix(short *pOut, int nFrames) {
-	int i, f;
+	int f;
 	for(f = 0; f < nFrames; ++f) {
-		int mix = 0;
+		int l = 0, r = 0;
 		if(s_rTail != s_rHead) {
-			mix = s_ring[s_rTail];
+			l = s_ringL[s_rTail];
+			r = s_ringR[s_rTail];
 			s_rTail = (s_rTail + 1) % RING;
 		}
 		else {
-			for(i = 0; i < 4; ++i) {
-				int v = s_ch[i].vol > 64 ? 64 : (int)s_ch[i].vol;
-				mix += s_ch[i].samp * v;
-			}
-			mix /= 4;
+			/* 1+2 left, 0+3 right */
+			l = chanSample(1) + chanSample(2);
+			r = chanSample(0) + chanSample(3);
 		}
-		if(mix > 32767) {
-			mix = 32767;
+		if(l > 32767) {
+			l = 32767;
 		}
-		if(mix < -32768) {
-			mix = -32768;
+		if(l < -32768) {
+			l = -32768;
 		}
-		pOut[f * 2] = (short)mix;
-		pOut[f * 2 + 1] = (short)mix;
+		if(r > 32767) {
+			r = 32767;
+		}
+		if(r < -32768) {
+			r = -32768;
+		}
+		pOut[f * 2] = (short)l;
+		pOut[f * 2 + 1] = (short)r;
 	}
 }
 
-/* Called from chipset end-of-line to produce ~PAULA_RATE/50 samples. */
-void paulaLineTick(void) {
-	int i, n = PAULA_RATE / 50;
-	int s;
+static void advanceChannel(tChan *p, ULONG paulaClock) {
+	uint64_t threshold;
+	if(!p->on || !p->per) {
+		return;
+	}
+	threshold = (uint64_t)p->per * PAULA_RATE;
+	p->periodPhase += paulaClock;
+	while(p->periodPhase >= threshold) {
+		p->periodPhase -= threshold;
+		if(!p->hasCurrent) {
+			continue;
+		}
+		if(p->sampIdx == 0) {
+			p->sampIdx = 1;
+		}
+		else if(p->hasNext) {
+			p->samp[0] = p->next[0];
+			p->samp[1] = p->next[1];
+			p->sampIdx = 0;
+			p->hasNext = 0;
+			p->needFetch = 1;
+		}
+		else {
+			p->sampIdx = 0;
+			p->hasCurrent = 0;
+			p->needFetch = 1;
+		}
+	}
+}
+
+void paulaLineTick(int lineRate, ULONG paulaClock) {
+	int s, n;
+	int i;
+	if(lineRate <= 0) {
+		return;
+	}
+	s_mixAcc += PAULA_RATE;
+	n = s_mixAcc / lineRate;
+	s_mixAcc %= lineRate;
 	for(s = 0; s < n; ++s) {
-		int mix = 0;
+		int l = chanSample(1) + chanSample(2);
+		int r = chanSample(0) + chanSample(3);
 		for(i = 0; i < 4; ++i) {
-			int v = s_ch[i].vol > 64 ? 64 : (int)s_ch[i].vol;
-			mix += s_ch[i].samp * v;
-			if(s_ch[i].on && s_ch[i].per) {
-				s_ch[i].periodAcc++;
-				if(s_ch[i].periodAcc >= s_ch[i].per) {
-					s_ch[i].periodAcc = 0;
-					/* sample already updated on DMA slot */
-				}
-			}
+			advanceChannel(&s_ch[i], paulaClock);
 		}
-		mix /= 2;
-		if(mix > 32767) {
-			mix = 32767;
+		if(l > 32767) {
+			l = 32767;
 		}
-		if(mix < -32768) {
-			mix = -32768;
+		if(l < -32768) {
+			l = -32768;
 		}
-		pushSample((int16_t)mix);
+		if(r > 32767) {
+			r = 32767;
+		}
+		if(r < -32768) {
+			r = -32768;
+		}
+		pushSample((int16_t)l, (int16_t)r);
 	}
 }

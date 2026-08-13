@@ -4,9 +4,50 @@
 
 #include <ace/managers/blit.h>
 #include <ace/managers/system.h>
+#include <ace/macros.h>
+#include <string.h>
 #ifdef ACE_HOST
 #include <ace_host/chipset.h>
+#define ECS_BLTSIZH_STROBE(width) ((width) ? (width) : 0x8000u)
+#else
+#define ECS_BLTSIZH_STROBE(width) (width)
 #endif
+
+/**
+ * Byte-aligned copy between bitmaps whose interleavedness differs.
+ * Uses each bitmap's BytesPerRow as the stride between successive lines of
+ * the same plane (full interleaved row, or one non-interleaved plane).
+ * Returns 1 if the copy was performed, 0 if the blit is not 16px-aligned.
+ */
+static UBYTE blitCopyMixedLayout(
+	const tBitMap *pSrc, WORD wSrcX, WORD wSrcY,
+	tBitMap *pDst, WORD wDstX, WORD wDstY, WORD wWidth, WORD wHeight
+) {
+	UBYTE ubPlane, ubDepth;
+	UWORD uwBytes;
+	WORD y;
+
+	if((wSrcX | wDstX | wWidth) & 0xF) {
+		return 0;
+	}
+
+	ubDepth = MIN(pSrc->Depth, pDst->Depth);
+	uwBytes = (UWORD)(wWidth >> 3);
+	for(ubPlane = 0; ubPlane < ubDepth; ++ubPlane) {
+		for(y = 0; y < wHeight; ++y) {
+			memcpy(
+				&pDst->Planes[ubPlane][
+					pDst->BytesPerRow * (ULONG)(wDstY + y) + (UWORD)(wDstX >> 3)
+				],
+				&pSrc->Planes[ubPlane][
+					pSrc->BytesPerRow * (ULONG)(wSrcY + y) + (UWORD)(wSrcX >> 3)
+				],
+				uwBytes
+			);
+		}
+	}
+	return 1;
+}
 
 void blitManagerCreate(void) {
 	logBlockBegin("blitManagerCreate");
@@ -148,6 +189,14 @@ UBYTE blitUnsafeCopy(
 		bitmapIsInterleaved(pSrc) && bitmapIsInterleaved(pDst) &&
 		pSrc->Depth == pDst->Depth
 	);
+	if(
+		!isBlitInterleaved &&
+		(bitmapIsInterleaved(pSrc) || bitmapIsInterleaved(pDst)) &&
+		(ubMinterm == MINTERM_COOKIE || ubMinterm == MINTERM_COPY || ubMinterm == MINTERM_B) &&
+		blitCopyMixedLayout(pSrc, wSrcX, wSrcY, pDst, wDstX, wDstY, wWidth, wHeight)
+	) {
+		return 1;
+	}
 
 	if(ubSrcDelta > ubDstDelta || ((wWidth+ubDstDelta+15) & 0xFFF0)-(wWidth+ubSrcDelta) > 16) {
 		uwBlitWidth = (wWidth+(ubSrcDelta>ubDstDelta?ubSrcDelta:ubDstDelta)+15) & 0xFFF0;
@@ -214,7 +263,7 @@ UBYTE blitUnsafeCopy(
 		g_pCustom->bltdpt = &pDst->Planes[0][ulDstOffs];
 #if defined(ACE_USE_ECS_FEATURES)
 		g_pCustom->bltsizv = wHeight;
-		g_pCustom->bltsizh = uwBlitWords;
+		g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 		g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
@@ -242,11 +291,14 @@ UBYTE blitUnsafeCopy(
 
 #if defined(ACE_USE_ECS_FEATURES)
 			g_pCustom->bltsizv = wHeight;
-			g_pCustom->bltsizh = uwBlitWords;
+			g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 			g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
 		}
+#ifdef ACE_HOST
+		blitWait();
+#endif
 	}
 
 	return 1;
@@ -293,7 +345,7 @@ UBYTE blitUnsafeCopyAligned(
 		g_pCustom->bltdpt = &pDst->Planes[0][ulDstOffs];
 #if defined(ACE_USE_ECS_FEATURES)
 		g_pCustom->bltsizv = wHeight;
-		g_pCustom->bltsizh = uwBlitWords;
+		g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 		g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
@@ -301,7 +353,11 @@ UBYTE blitUnsafeCopyAligned(
 	}
 	else {
 		if(bitmapIsInterleaved(pSrc) || bitmapIsInterleaved(pDst)) {
-			// Since you're using this fn for speed
+			if(blitCopyMixedLayout(
+				pSrc, wSrcX, wSrcY, pDst, wDstX, wDstY, wWidth, wHeight
+			)) {
+				return 1;
+			}
 			logWrite("WARN: Mixed interleaved - you're losing lots of performance here\n");
 		}
 
@@ -320,11 +376,14 @@ UBYTE blitUnsafeCopyAligned(
 			g_pCustom->bltdpt = &pDst->Planes[ubPlane][ulDstOffs];
 #if defined(ACE_USE_ECS_FEATURES)
 			g_pCustom->bltsizv = wHeight;
-			g_pCustom->bltsizh = uwBlitWords;
+			g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 			g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
 		}
+#ifdef ACE_HOST
+		blitWait();
+#endif
 	}
 
 	return 1;
@@ -337,6 +396,10 @@ UBYTE blitSafeCopyAligned(
 ) {
 	if((wSrcX | wDstX | wWidth) & 0x000F) {
 		logWrite("ERR: Dimensions are not divisible by 16\n");
+		return 0;
+	}
+	if(!pSrc || !pDst) {
+		logWrite("ERR: Null bitmap on blitCopyAligned (%s:%u)\n", szFile, uwLine);
 		return 0;
 	}
 	if(!blitCheck(
@@ -450,7 +513,7 @@ UBYTE blitUnsafeCopyMask(
 		g_pCustom->bltdpt = &pDst->Planes[0][ulDstOffs];
 #if defined(ACE_USE_ECS_FEATURES)
 		g_pCustom->bltsizv = wHeight;
-		g_pCustom->bltsizh = uwBlitWords;
+		g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 		g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
@@ -481,11 +544,14 @@ UBYTE blitUnsafeCopyMask(
 
 #if defined(ACE_USE_ECS_FEATURES)
 			g_pCustom->bltsizv = wHeight;
-			g_pCustom->bltsizh = uwBlitWords;
+			g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 			g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
 		}
+#ifdef ACE_HOST
+		blitWait();
+#endif
 	}
 
 	return 1;
@@ -546,7 +612,7 @@ UBYTE blitUnsafeRect(
 		g_pCustom->bltdpt = pDst->Planes[ubPlane] + ulDstOffs;
 #if defined(ACE_USE_ECS_FEATURES)
 		g_pCustom->bltsizv = wHeight;
-		g_pCustom->bltsizh = uwBlitWords;
+		g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 		g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
@@ -594,7 +660,7 @@ void blitUnsafeFillAligned(
 	g_pCustom->bltdpt = pPlaneOffset;
 #if defined(ACE_USE_ECS_FEATURES)
 	g_pCustom->bltsizv = wHeight;
-	g_pCustom->bltsizh = uwBlitWords;
+	g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 	g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif

@@ -23,6 +23,7 @@ set(ACE_HOST_MEM_MODE "STRICT" CACHE STRING "Host memory mode: STRICT or VIRTUAL
 set(ACE_HOST_CHIP_SIZE 0 CACHE STRING "CUSTOM machine CHIP size in bytes")
 set(ACE_HOST_FAST_SIZE 0 CACHE STRING "CUSTOM machine FAST size in bytes")
 option(ACE_HOST_DEBUG "Host debug HUD (F11/F12)" ON)
+option(ACE_HOST_USE_VIRTUAL_JOYSTICK "Host: map WASD/numpad/gamepad to JOY1DAT (port 2). Arrows stay CIA keys." OFF)
 
 message(STATUS "[ACE] ACE_LIBRARY_KIND: '${ACE_LIBRARY_KIND}'")
 message(STATUS "[ACE] ACE_DEBUG: '${ACE_DEBUG}'")

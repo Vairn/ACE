@@ -234,9 +234,8 @@ void gsTestCopperLoop(void) {
 		tCopCmd *pBarCmds = &pCopBfr->pList[s_uwCopRawOffs];
 		for(UBYTE i = 0; i < 32; ++i) {
 			// Replace WAIT cmd's Y value.
-			pBarCmds[i * 2 + 0].sWait.bfWaitY = s_uwBarY + i;
-			// Replace color value
-			pBarCmds[i * 2 + 1].sMove.bfValue = pColors[i];
+			copSetWaitY(&pBarCmds[i * 2 + 0].sWait, (UBYTE)(s_uwBarY + i));
+			copSetMoveVal(&pBarCmds[i * 2 + 1].sMove, pColors[i]);
 		}
 	}
 	else {

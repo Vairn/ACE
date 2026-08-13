@@ -1,5 +1,7 @@
 #include "chipset_priv.h"
+#include "host_os.h"
 #include <ace/managers/key.h>
+#include <ace/managers/game.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -13,6 +15,13 @@ static int s_hudFull;
 static int s_scale = 2;
 static int s_quit;
 static int s_isPal = 1;
+static int s_noPace;
+static int s_headless;
+static int s_autoKeyFrame = -1;
+static int s_autoKeyUpFrame = -1;
+static int s_quitAfter = 0;
+static int s_vbl;
+static UBYTE s_autoKey;
 static UWORD s_joy0, s_joy1;
 static UWORD s_pot = 0xFFFF;
 static UBYTE s_fireMask;
@@ -23,6 +32,9 @@ static SDL_Window *s_win;
 static SDL_Renderer *s_ren;
 static SDL_Texture *s_tex;
 static SDL_AudioDeviceID s_audio;
+#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
+static SDL_GameController *s_pad;
+#endif
 static Uint64 s_paceFreq;
 static Uint64 s_nextPace;
 static int s_paceReady;
@@ -129,23 +141,149 @@ static void sendKey(UBYTE code, int down) {
 	}
 	chipsetInjectKey(raw);
 }
+
+#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
+static int isVirtualJoyKey(SDL_Scancode sc) {
+	return sc == SDL_SCANCODE_W || sc == SDL_SCANCODE_A ||
+		sc == SDL_SCANCODE_S || sc == SDL_SCANCODE_D ||
+		sc == SDL_SCANCODE_KP_8 || sc == SDL_SCANCODE_KP_2 ||
+		sc == SDL_SCANCODE_KP_4 || sc == SDL_SCANCODE_KP_6 ||
+		sc == SDL_SCANCODE_KP_0 || sc == SDL_SCANCODE_Z ||
+		sc == SDL_SCANCODE_X || sc == SDL_SCANCODE_LCTRL ||
+		sc == SDL_SCANCODE_RCTRL || sc == SDL_SCANCODE_LALT ||
+		sc == SDL_SCANCODE_RALT;
+}
+
+/* Amiga JOYxDAT: up = bit8 XOR bit9, down = bit0 XOR bit1, left = bit9, right = bit1. */
+static UWORD joyDatFromDirs(int up, int down, int left, int right) {
+	UWORD dat = 0;
+	if(left) {
+		dat |= (UWORD)(1u << 9);
+	}
+	if(right) {
+		dat |= (UWORD)(1u << 1);
+	}
+	if(up ^ left) {
+		dat |= (UWORD)(1u << 8);
+	}
+	if(down ^ right) {
+		dat |= (UWORD)(1u << 0);
+	}
+	return dat;
+}
+
+static void closePad(void) {
+	if(s_pad) {
+		SDL_GameControllerClose(s_pad);
+		s_pad = 0;
+	}
+}
+
+static SDL_JoystickID padInstanceId(void) {
+	SDL_Joystick *js;
+	if(!s_pad) {
+		return -1;
+	}
+	js = SDL_GameControllerGetJoystick(s_pad);
+	return js ? SDL_JoystickInstanceID(js) : (SDL_JoystickID)-1;
+}
+
+static void openPadAt(int index) {
+	const char *name;
+	if(s_pad || index < 0 || !SDL_IsGameController(index)) {
+		return;
+	}
+	s_pad = SDL_GameControllerOpen(index);
+	if(!s_pad) {
+		fprintf(stderr, "[ACE_HOST] gamepad open failed: %s\n", SDL_GetError());
+		return;
+	}
+	name = SDL_GameControllerName(s_pad);
+	fprintf(stderr, "[ACE_HOST] gamepad connected: %s\n", name ? name : "?");
+}
+
+static void openFirstPad(void) {
+	int i, n;
+	if(s_pad) {
+		return;
+	}
+	n = SDL_NumJoysticks();
+	for(i = 0; i < n; ++i) {
+		openPadAt(i);
+		if(s_pad) {
+			return;
+		}
+	}
+}
+#endif
 #endif
 
 void aceHostSdlInit(int isPal) {
 	s_isPal = isPal;
+	{
+		const char *sz;
+		sz = getenv("ACE_HOST_NOPACE");
+		s_noPace = (sz && sz[0] && sz[0] != '0');
+		sz = getenv("ACE_HOST_HEADLESS");
+		if(sz && sz[0] && sz[0] != '0') {
+			s_headless = 1;
+			s_noPace = 1;
+		}
+		sz = getenv("ACE_HOST_QUIT_AFTER");
+		if(sz && sz[0]) {
+			s_quitAfter = atoi(sz);
+		}
+		sz = getenv("ACE_HOST_AUTO_KEY");
+		if(sz && sz[0]) {
+			if(!_stricmp(sz, "return") || !_stricmp(sz, "enter")) {
+				s_autoKey = KEY_RETURN;
+			}
+			else if(!_stricmp(sz, "space")) {
+				s_autoKey = KEY_SPACE;
+			}
+			else if(!_stricmp(sz, "escape") || !_stricmp(sz, "esc")) {
+				s_autoKey = KEY_ESCAPE;
+			}
+			else {
+				s_autoKey = (UBYTE)strtoul(sz, 0, 0);
+			}
+			s_autoKeyFrame = 10;
+			sz = getenv("ACE_HOST_AUTO_KEY_FRAME");
+			if(sz && sz[0]) {
+				s_autoKeyFrame = atoi(sz);
+			}
+			if(s_autoKeyFrame < 1) {
+				s_autoKeyFrame = 1;
+			}
+			s_autoKeyUpFrame = s_autoKeyFrame + 2;
+			fprintf(stderr, "[ACE_HOST] auto-key 0x%02X on vblank %d\n",
+				s_autoKey, s_autoKeyFrame);
+		}
+	}
+	if(s_headless) {
+		fprintf(stderr, "[ACE_HOST] headless (no SDL window)\n");
+		return;
+	}
 #ifdef ACE_HOST_HAS_SDL
 	{
 		SDL_AudioSpec want, have;
 		int h = isPal ? ACE_HOST_FB_HEIGHT_PAL : ACE_HOST_FB_HEIGHT_NTSC;
 		int winW = ACE_HOST_FB_WIDTH * s_scale;
 		int winH = winW * 3 / 4; /* 4:3 CRT, not square-pixel 640x256 */
+#if SDL_VERSION_ATLEAST(2, 0, 16)
+		SDL_SetMemoryFunctions(hostOsHeapMalloc, hostOsHeapCalloc, hostOsHeapRealloc, hostOsHeapFree);
+#endif
 #if SDL_VERSION_ATLEAST(2, 24, 0)
 		SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
 #endif
 #ifdef SDL_HINT_WINDOWS_DPI_SCALING
 		SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "0");
 #endif
-		if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) != 0) {
+		if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS
+#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
+			| SDL_INIT_GAMECONTROLLER
+#endif
+			) != 0) {
 			fprintf(stderr, "[ACE_HOST] SDL_Init: %s\n", SDL_GetError());
 			return;
 		}
@@ -179,6 +317,10 @@ void aceHostSdlInit(int isPal) {
 			SDL_PauseAudioDevice(s_audio, 0);
 		}
 		SDL_SetRelativeMouseMode(SDL_TRUE);
+#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
+		openFirstPad();
+		fprintf(stderr, "[ACE_HOST] virtual joystick ON (WASD/numpad/gamepad → JOY1DAT)\n");
+#endif
 		s_paceFreq = SDL_GetPerformanceFrequency();
 		if(!s_paceFreq) {
 			s_paceFreq = 1000;
@@ -195,6 +337,9 @@ void aceHostSdlShutdown(void) {
 	if(s_audio) {
 		SDL_CloseAudioDevice(s_audio);
 	}
+#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
+	closePad();
+#endif
 	if(s_tex) {
 		SDL_DestroyTexture(s_tex);
 	}
@@ -219,16 +364,34 @@ void aceHostSdlPump(void) {
 			s_mouseX = (UBYTE)(s_mouseX + e.motion.xrel);
 			s_mouseY = (UBYTE)(s_mouseY + e.motion.yrel);
 		}
+#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
+		else if(e.type == SDL_CONTROLLERDEVICEADDED) {
+			/* ADDED.which is a device index. */
+			openPadAt(e.cdevice.which);
+		}
+		else if(e.type == SDL_CONTROLLERDEVICEREMOVED) {
+			/* REMOVED.which is a joystick instance id. */
+			if(padInstanceId() == (SDL_JoystickID)e.cdevice.which) {
+				fprintf(stderr, "[ACE_HOST] gamepad disconnected\n");
+				closePad();
+				openFirstPad();
+			}
+		}
+#endif
 		else if(e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
 			int down = e.type == SDL_KEYDOWN;
 			if(e.key.repeat) {
 				continue;
 			}
 			if(down && e.key.keysym.scancode == SDL_SCANCODE_F11) {
+#ifdef ACE_HOST_DEBUG
 				s_hudOn ^= 1;
+#endif
 			}
 			else if(down && e.key.keysym.scancode == SDL_SCANCODE_F12) {
+#ifdef ACE_HOST_DEBUG
 				s_hudFull ^= 1;
+#endif
 			}
 			else if(down && e.key.keysym.scancode == SDL_SCANCODE_F10) {
 				chipsetSetTimingLog(!chipsetTimingLogEnabled());
@@ -236,6 +399,11 @@ void aceHostSdlPump(void) {
 					chipsetTimingLogEnabled() ? "on" : "off");
 			}
 			else {
+#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
+				if(isVirtualJoyKey(e.key.keysym.scancode)) {
+					continue;
+				}
+#endif
 				sendKey(amiKey(e.key.keysym.scancode), down);
 			}
 		}
@@ -248,25 +416,46 @@ void aceHostSdlPump(void) {
 
 void aceHostSdlApplyInput(void) {
 #ifdef ACE_HOST_HAS_SDL
+#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 	const Uint8 *ks = SDL_GetKeyboardState(NULL);
-	int fire = ks[SDL_SCANCODE_LCTRL] || ks[SDL_SCANCODE_RCTRL] || ks[SDL_SCANCODE_Z];
-	int fire2 = ks[SDL_SCANCODE_LALT] || ks[SDL_SCANCODE_X];
+#endif
 	int m1 = SDL_GetMouseState(NULL, NULL);
-	/* Arrows are CIA keys only. Feeding them into joy1dat made menu
-	 * `keyUse(KEY_UP) || joyUse(JOY1_UP)` take two steps per press. */
-	s_joy1 = 0;
 	s_joy0 = (UWORD)(((UWORD)s_mouseY << 8) | s_mouseX);
+	s_joy1 = 0;
 	s_fireMask = 0;
-	/* Port 2 (joy1dat / JOY1) fire is CIA FIR1; port 1 mouse LMB is FIR0. */
-	if(fire) {
-		s_fireMask |= CIAAPRA_FIR1;
+	s_pot = 0xFFFF;
+#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
+	{
+		int up = ks[SDL_SCANCODE_W] || ks[SDL_SCANCODE_KP_8];
+		int down = ks[SDL_SCANCODE_S] || ks[SDL_SCANCODE_KP_2];
+		int left = ks[SDL_SCANCODE_A] || ks[SDL_SCANCODE_KP_4];
+		int right = ks[SDL_SCANCODE_D] || ks[SDL_SCANCODE_KP_6];
+		int fire = ks[SDL_SCANCODE_LCTRL] || ks[SDL_SCANCODE_RCTRL] ||
+			ks[SDL_SCANCODE_Z] || ks[SDL_SCANCODE_KP_0];
+		int fire2 = ks[SDL_SCANCODE_LALT] || ks[SDL_SCANCODE_X];
+		if(s_pad) {
+			up |= SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
+				(SDL_GameControllerGetAxis(s_pad, SDL_CONTROLLER_AXIS_LEFTY) < -8000);
+			down |= SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN) ||
+				(SDL_GameControllerGetAxis(s_pad, SDL_CONTROLLER_AXIS_LEFTY) > 8000);
+			left |= SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT) ||
+				(SDL_GameControllerGetAxis(s_pad, SDL_CONTROLLER_AXIS_LEFTX) < -8000);
+			right |= SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) ||
+				(SDL_GameControllerGetAxis(s_pad, SDL_CONTROLLER_AXIS_LEFTX) > 8000);
+			fire |= SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_A);
+			fire2 |= SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_B);
+		}
+		s_joy1 = joyDatFromDirs(up, down, left, right);
+		if(fire) {
+			s_fireMask |= CIAAPRA_FIR1;
+		}
+		if(fire2) {
+			s_pot &= (UWORD)~(1u << 14);
+		}
 	}
+#endif
 	if(m1 & SDL_BUTTON_LMASK) {
 		s_fireMask |= CIAAPRA_FIR0;
-	}
-	s_pot = 0xFFFF;
-	if(fire2) {
-		s_pot &= (UWORD)~(1u << 14);
 	}
 	if(m1 & SDL_BUTTON_RMASK) {
 		s_pot &= (UWORD)~(1u << 10);
@@ -327,16 +516,15 @@ void aceHostSdlPresent(const UWORD *pFb, int width, int height) {
 #ifdef ACE_HOST_HAS_SDL
 	SDL_Rect dst;
 	int rw, rh;
-	if(!s_ren || !s_tex) {
+	if(s_headless || !s_ren || !s_tex) {
 		return;
 	}
 	memcpy(s_presentTmp, pFb, (size_t)width * (size_t)height * sizeof(UWORD));
+#ifdef ACE_HOST_DEBUG
 	if(s_hudOn) {
 		aceHostHudDraw(s_presentTmp, width, height);
-		if(s_hudFull) {
-			/* extra panel drawn inside hud */
-		}
 	}
+#endif
 	SDL_UpdateTexture(s_tex, NULL, s_presentTmp, width * (int)sizeof(UWORD));
 	SDL_GetRendererOutputSize(s_ren, &rw, &rh);
 	if(rw * 3 >= rh * 4) {
@@ -365,12 +553,28 @@ void aceHostSdlPresent(const UWORD *pFb, int width, int height) {
 void aceHostOnVblank(void) {
 	int w, h;
 	UWORD *fb = chipsetFramebuffer(&w, &h);
-	aceHostSdlPump();
-	aceHostSdlApplyInput();
+	if(!s_headless) {
+		aceHostSdlPump();
+		aceHostSdlApplyInput();
+	}
 	aceHostSdlPresent(fb, w, h);
 #ifdef ACE_HOST_HAS_SDL
-	aceHostPaceVblank();
+	if(!s_headless && !s_noPace) {
+		aceHostPaceVblank();
+	}
 #endif
+	s_vbl++;
+	if(s_autoKey && s_vbl == s_autoKeyFrame) {
+		fprintf(stderr, "[ACE_HOST] inject key 0x%02X down vbl=%d\n", s_autoKey, s_vbl);
+		chipsetInjectKey(s_autoKey);
+	}
+	if(s_autoKey && s_vbl == s_autoKeyUpFrame) {
+		chipsetInjectKey((UBYTE)(s_autoKey | 0x80));
+	}
+	if(s_quitAfter > 0 && s_vbl >= s_quitAfter) {
+		fprintf(stderr, "[ACE_HOST] quit after %d vblanks\n", s_vbl);
+		gameExit();
+	}
 }
 
 int aceHostPollQuit(void) {

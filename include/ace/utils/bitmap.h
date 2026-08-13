@@ -143,6 +143,8 @@ void bitmapLoadFromPath(
  *  @brief Loads bitmap data from file to already existing bitmap.
  *  If source is smaller than destination, you can use uwStartX & uwStartY
  *  params to load bitmap on given coords.
+ *  Interleaved and non-interleaved source files are converted to the
+ *  destination bitmap's layout.
  *
  *  @param pBitMap Pointer to destination bitmap
  *  @param pFile Handle to the bitmap file. Will be closed on function return.

@@ -367,11 +367,15 @@ static UWORD tileBufferSetupTileDraw(const tTileBufferManager *pManager) {
 			// Since you're using this fn for speed
 			logWrite("WARN: Mixed interleaved - you're losing lots of performance here!\n");
 		}
+		// Skip the other planes in an interleaved row. Use plane byte-width,
+		// not BytesPerRow (which is already plane-width * depth when interleaved).
 		if(ubSrcInterleaved) {
-			wSrcModulo += pManager->pTileSet->BytesPerRow * (pManager->pTileSet->Depth-1);
+			wSrcModulo += bitmapGetByteWidth(pManager->pTileSet) *
+				(pManager->pTileSet->Depth - 1);
 		}
 		else if(ubDstInterleaved) {
-			wDstModulo += pManager->pScroll->pBack->BytesPerRow * (pManager->pScroll->pBack->Depth-1);
+			wDstModulo += bitmapGetByteWidth(pManager->pScroll->pBack) *
+				(pManager->pScroll->pBack->Depth - 1);
 		}
 	}
 

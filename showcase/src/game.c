@@ -6,6 +6,10 @@
 #include <ace/managers/joy.h>
 #include <ace/managers/key.h>
 #include <ace/managers/game.h>
+#ifdef ACE_HOST
+#include <stdlib.h>
+#include <string.h>
+#endif
 #include "menu/menu.h"
 #include "test/blit.h"
 #include "test/input.h"
@@ -43,11 +47,45 @@ tState g_pTestStates[TEST_STATE_COUNT] = {
 #define GENERIC_MAIN_LOOP_CONDITION gameIsRunning() && g_pGameStateManager->pCurrent
 #include <ace/generic/main.h>
 
+#ifdef ACE_HOST
+static int hostTestIndex(const char *sz) {
+	static const char *kNames[TEST_STATE_COUNT] = {
+		"menu", "blit", "input", "font", "copper", "lines",
+		"blit_small_dest", "interleaved", "buffer_scroll", "buffer_reuse",
+		"twister", "simple_buffer_bpp", "scroll_tile_buffer"
+	};
+	int i, n;
+	if(!sz || !sz[0]) {
+		return -1;
+	}
+	for(i = 0; i < TEST_STATE_COUNT; ++i) {
+		if(_stricmp(sz, kNames[i]) == 0) {
+			return i;
+		}
+	}
+	n = atoi(sz);
+	if(n > 0 && n < TEST_STATE_COUNT) {
+		return n;
+	}
+	return -1;
+}
+#endif
+
 void genericCreate(void) {
 	joyOpen();
 	keyCreate();
 
     createGameStates();
+#ifdef ACE_HOST
+	{
+		const char *sz = getenv("ACE_HOST_TEST");
+		int idx = hostTestIndex(sz);
+		if(idx >= 0) {
+			stateChange(g_pGameStateManager, &g_pTestStates[idx]);
+			return;
+		}
+	}
+#endif
     stateChange(g_pGameStateManager, &g_pTestStates[TEST_STATE_MENU]);
 }
 

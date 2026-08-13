@@ -7,6 +7,9 @@
 #include <ace/managers/system.h>
 #include <ace/utils/tag.h>
 #include <ace/generic/screen.h>
+#ifdef ACE_HOST
+#include <ace_host/chipset.h>
+#endif
 
 static UBYTE s_isPAL;
 
@@ -177,10 +180,16 @@ void viewUpdateGlobalPalette(const tView *pView) {
 					UBYTE r = pPaletteAGA[(p * 32) + i] >> 16;
 					UBYTE g = pPaletteAGA[(p * 32) + i] >> 8;
 					UBYTE b = pPaletteAGA[(p * 32) + i];
-					g_pCustom->bplcon3 = p << 13; // Set palette bank LOW.
+					g_pCustom->bplcon3 = p << 13; // Set palette bank HIGH (LOCT=0).
 					g_pCustom->color[i] = (r >> 4) << 8 | (g >> 4) << 4 | (b >> 4) << 0;
-					g_pCustom->bplcon3 = p << 13 | BV(9); // Set palette bank High.
+#ifdef ACE_HOST
+					chipsetSyncCpuWrites();
+#endif
+					g_pCustom->bplcon3 = p << 13 | BV(9); // Set palette bank LOW (LOCT=1).
 					g_pCustom->color[i] = (0x0F & r) << 8 | (0x0F & g) << 4 | (0x0F & b) << 0;
+#ifdef ACE_HOST
+					chipsetSyncCpuWrites();
+#endif
 				}
 			}
 		}
@@ -246,7 +255,8 @@ void viewLoad(tView *pView) {
 		g_pCustom->bplcon0 = 0; // No output
 		g_pCustom->fmode = 0;   // AGA fix
 		g_pCustom->bplcon3 = 0; // AGA fix
-		g_pCustom->bplcon4 = 0x0011; // AGA fix
+		/* ESPRM/OSPRM = 1 (OCS sprite colors 16–31); BPLAM XOR = 0 */
+		g_pCustom->bplcon4 = 0x1100;
 #ifdef ACE_USE_AGA_FEATURES
 		for(UBYTE i = 0; i < 8; ++i) {
 			g_pCustom->bplpt[i] = 0;
@@ -282,7 +292,8 @@ void viewLoad(tView *pView) {
 		g_pCustom->bplcon0 = viewBuildBplCon0(pView);
 		g_pCustom->bplcon2 = viewBuildBplCon2(pView);
 		g_pCustom->bplcon3 = 0; // AGA fix
-		g_pCustom->bplcon4 = 0x0011; // AGA fix
+		/* ESPRM/OSPRM = 1 (OCS sprite colors 16–31); BPLAM XOR = 0 */
+		g_pCustom->bplcon4 = 0x1100;
 #ifdef ACE_USE_AGA_FEATURES
 		g_pCustom->fmode = pView->pFirstVPort->ubFmode;
 #else

@@ -291,16 +291,15 @@ void bitmapLoadFromFd(
 	}
 	logWrite("Source dimensions: %ux%u\n", uwSrcWidth, uwSrcHeight);
 
-	// Interleaved check
-	if(!!(ubSrcFlags & BITMAP_INTERLEAVED) != bitmapIsInterleaved(pBitMap)) {
+	// Interleaved check — convert rather than reject so non-interleaved .bm
+	// files can load into interleaved display buffers (and vice versa).
+	UBYTE isFileInterleaved = !!(ubSrcFlags & BITMAP_INTERLEAVED);
+	UBYTE isDstInterleaved = bitmapIsInterleaved(pBitMap);
+	if(isFileInterleaved != isDstInterleaved) {
 		logWrite(
-			"ERR: Interleaved flag conflict (file: %d, bm: %hhu)\n",
-			!!(ubSrcFlags & BITMAP_INTERLEAVED), bitmapIsInterleaved(pBitMap)
+			"WARN: Converting bitmap layout (file interleaved: %d, dest: %hhu)\n",
+			isFileInterleaved, isDstInterleaved
 		);
-		fileClose(pFile);
-		logBlockEnd("bitmapLoadFromFd()");
-		systemUnuse();
-		return;
 	}
 
 	// Depth check
@@ -330,10 +329,11 @@ void bitmapLoadFromFd(
 		return;
 	}
 
-	// Read data
+	// Read data. File order is plane-major unless BITMAP_INTERLEAVED.
+	// Dest stride between lines of the same plane is always BytesPerRow.
 	uwWidth = bitmapGetByteWidth(pBitMap);
 	UWORD uwReadBytesPerRow = (uwSrcWidth + 7) / 8;
-	if(bitmapIsInterleaved(pBitMap)) {
+	if(isFileInterleaved == isDstInterleaved && isDstInterleaved) {
 		UWORD uwDestOffs = uwWidth * (uwStartY * pBitMap->Depth) + (uwStartX / 8);
 		if(uwStartX == 0 && uwSrcWidth == uwDstWidth) {
 			fileRead(
@@ -355,16 +355,31 @@ void bitmapLoadFromFd(
 			}
 		}
 	}
-	else {
-		for(ubPlane = 0; ubPlane != pBitMap->Depth; ++ubPlane) {
-			for(y = 0; y != uwSrcHeight; ++y) {
-				UWORD uwDestOffs = uwWidth * uwStartY + (uwStartX / 8);
+	else if(isFileInterleaved) {
+		// Interleaved file → non-interleaved dest (or mixed): row of all planes.
+		for(y = 0; y < uwSrcHeight; ++y) {
+			for(ubPlane = 0; ubPlane != pBitMap->Depth; ++ubPlane) {
+				ULONG ulDestOffs = (ULONG)pBitMap->BytesPerRow * (uwStartY + y) +
+					(uwStartX / 8);
 				fileRead(
 					pFile,
-					&pBitMap->Planes[ubPlane][uwDestOffs],
+					&pBitMap->Planes[ubPlane][ulDestOffs],
 					uwReadBytesPerRow
 				);
-				uwDestOffs += uwWidth;
+			}
+		}
+	}
+	else {
+		// Non-interleaved file → dest of either layout.
+		for(ubPlane = 0; ubPlane != pBitMap->Depth; ++ubPlane) {
+			for(y = 0; y != uwSrcHeight; ++y) {
+				ULONG ulDestOffs = (ULONG)pBitMap->BytesPerRow * (uwStartY + y) +
+					(uwStartX / 8);
+				fileRead(
+					pFile,
+					&pBitMap->Planes[ubPlane][ulDestOffs],
+					uwReadBytesPerRow
+				);
 			}
 		}
 	}
@@ -488,10 +503,16 @@ void bitmapDestroy(tBitMap *pBitMap) {
 UBYTE bitmapIsInterleaved(const tBitMap *pBitMap) {
 	// The check for depth is because of how bitmapGetByteWidth() works
 	// if byte width were to be stored in bitmap struct, the depth check can be skipped.
+	if(!pBitMap) {
+		return 0;
+	}
 	return (pBitMap->Depth > 1) && (pBitMap->Flags & BMF_INTERLEAVED);
 }
 
 UBYTE bitmapIsChip(const tBitMap *pBitMap) {
+	if(!pBitMap || !pBitMap->Planes[0]) {
+		return 0;
+	}
 	return memType(pBitMap->Planes[0]) == MEMF_CHIP;
 }
 
@@ -662,7 +683,7 @@ void bitmapSaveBmp(
 
 UWORD bitmapGetByteWidth(const tBitMap *pBitMap) {
 	if(bitmapIsInterleaved(pBitMap)) {
-		return ((ULONG)pBitMap->Planes[1] - (ULONG)pBitMap->Planes[0]);
+		return (UWORD)(pBitMap->Planes[1] - pBitMap->Planes[0]);
 	}
 	return pBitMap->BytesPerRow;
 }

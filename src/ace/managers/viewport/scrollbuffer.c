@@ -257,10 +257,10 @@ static void resetBreakCopperlist(tCopCmd *pCmds, const UWORD uwOffsY, const UBYT
 }
 
 static void updateBreakCopperlist(tCopCmd *pCmds, const tBitMap *pBitmap, const UWORD uwSplitPos, const ULONG ulBplAddX) {
-	pCmds[2].sWait.bfIsSkip = 1; // skip the jump so we have this block enabled
+	copSetSkipBit(&pCmds[2].sWait, 1); // skip the jump so we have this block enabled
 
 	UBYTE i = 4; // the first 4 bytes are cop2lch, cop2lcl, SKIP/WAIT, cop2jmp
-	pCmds[i++].sWait.bfWaitY = uwSplitPos;
+	copSetWaitY(&pCmds[i++].sWait, (UBYTE)uwSplitPos);
 	for(UBYTE j = 0; j < pBitmap->Depth; j++) {
 		ULONG ulPlaneAddr = (ULONG)(pBitmap->Planes[j]) + ulBplAddX;
 		copSetMoveVal(&pCmds[i++].sMove, ulPlaneAddr >> 16);
@@ -271,7 +271,7 @@ static void updateBreakCopperlist(tCopCmd *pCmds, const tBitMap *pBitmap, const 
 static void disableBreakCopperlist(tCopCmd *pCmds) {
 	// disable the block by setting the block to skip the jump if we're past the beginning
 	// of the start block (which we always are)
-	pCmds[2].sWait.bfIsSkip = 0; // do not skip the jump
+	copSetSkipBit(&pCmds[2].sWait, 0); // do not skip the jump
 }
 
 FN_HOTSPOT

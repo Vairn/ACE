@@ -18,8 +18,10 @@ tLogManager g_sLogManager = {0};
 static char s_szMsg[1024];
 
 #ifdef ACE_DEBUG_UAE
-
-	#if defined(BARTMAN_GCC)
+	#if defined(ACE_HOST)
+		/* Host already logs to stdout; never poke UAE/emulator addresses. */
+		#define printUae(x) do {} while(0)
+	#elif defined(BARTMAN_GCC)
 long (*bartmanLog)(long mode, const char *string) = (long (*)(long, const char *))0xf0ff60;
 static inline void printUae(const char *szMsg) {
 	if (*((UWORD *)bartmanLog) == 0x4eb9 || *((UWORD *)bartmanLog) == 0xa00e) {
@@ -32,7 +34,6 @@ static inline void printUae(const char *szMsg) {
 	*s_pUaeFmt = (ULONG)((UBYTE*)szMsg);
 }
 	#endif
-
 #else
 #define printUae(x) do {} while(0)
 #endif

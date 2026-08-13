@@ -64,7 +64,7 @@ if(ACE_HOST)
 		target_compile_options(${TARGET_NAME} PRIVATE /W3 /wd4244 /wd4267 /wd4311 /wd4312 /wd4047 /wd4028)
 		target_compile_definitions(${TARGET_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
 	else()
-		target_compile_options(${TARGET_NAME} PRIVATE -Wall -Wextra -Wno-int-conversion -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter)
+		target_compile_options(${TARGET_NAME} PRIVATE -Wall -Wextra -Wno-int-conversion -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter -g -fno-omit-frame-pointer)
 	endif()
 else()
 	target_compile_options(${TARGET_NAME} PRIVATE $<$<OR:$<COMPILE_LANGUAGE:CXX>,$<COMPILE_LANGUAGE:C>>:-Wall -Wextra>)
@@ -181,10 +181,14 @@ if(ACE_HOST)
 	if(ACE_HOST_DEBUG)
 		target_compile_definitions(${TARGET_NAME} PUBLIC ACE_HOST_DEBUG)
 	endif()
+	if(ACE_HOST_USE_VIRTUAL_JOYSTICK)
+		target_compile_definitions(${TARGET_NAME} PUBLIC ACE_HOST_USE_VIRTUAL_JOYSTICK)
+	endif()
 
 	target_sources(${TARGET_NAME} PRIVATE
 		host/chipset/host_os.c
 		host/chipset/memory.c
+		host/chipset/stdlib_alloc.c
 		host/chipset/chipset.c
 		host/chipset/blitter.c
 		host/chipset/cia.c
@@ -192,6 +196,7 @@ if(ACE_HOST)
 		host/system_host.c
 		host/sdl/sdl_host.c
 		host/debug/hud.c
+		host/debug/crash.c
 	)
 	target_include_directories(${TARGET_NAME} PUBLIC
 		${PROJECT_SOURCE_DIR}/host/include
@@ -199,6 +204,20 @@ if(ACE_HOST)
 	target_include_directories(${TARGET_NAME} PRIVATE
 		${PROJECT_SOURCE_DIR}/host/chipset
 	)
+	if(NOT MSVC AND NOT APPLE)
+		# Route libc malloc through AllocMem(MEMF_ANY). SDL is pointed at the
+		# real OS heap so the window/renderer do not eat CHIP/FAST.
+		set(_ACE_MALLOC_WRAP
+			"LINKER:--wrap,malloc"
+			"LINKER:--wrap,calloc"
+			"LINKER:--wrap,realloc"
+			"LINKER:--wrap,free"
+			"LINKER:--wrap,strdup"
+			"LINKER:--wrap,_strdup"
+			"LINKER:--wrap,_msize"
+		)
+		target_link_options(${TARGET_NAME} PUBLIC ${_ACE_MALLOC_WRAP})
+	endif()
 
 	find_package(SDL2 QUIET)
 	if(NOT SDL2_FOUND)
@@ -225,7 +244,7 @@ if(ACE_HOST)
 	else()
 		message(WARNING "[ACE] SDL2 not found — host library builds without video/audio. Install SDL2 or allow FetchContent.")
 	endif()
-	message(STATUS "[ACE] ACE_HOST machine=${ACE_HOST_MACHINE} mem=${ACE_HOST_MEM_MODE}")
+	message(STATUS "[ACE] ACE_HOST machine=${ACE_HOST_MACHINE} mem=${ACE_HOST_MEM_MODE} virtual_joy=${ACE_HOST_USE_VIRTUAL_JOYSTICK}")
 endif()
 
 target_include_directories(${TARGET_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/include)

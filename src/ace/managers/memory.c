@@ -224,27 +224,19 @@ void _memFreeDbg(
 void *_memAllocRls(ULONG ulSize, ULONG ulFlags) {
 	systemUse();
 	void *pResult;
-	#ifdef AMIGA
 	pResult = AllocMem(ulSize, ulFlags);
 	if(!(ulFlags & MEMF_CHIP) && !pResult) {
-		// No FAST available - allocate CHIP instead
+		// No FAST available - allocate CHIP instead (MEMF_ANY)
 		logWrite("[MEM] WARN: Couldn't allocate FAST mem\r\n");
 		pResult = AllocMem(ulSize, (ulFlags & ~MEMF_FAST) | MEMF_ANY);
 	}
-	#else
-	pResult =  malloc(ulSize);
-	#endif // AMIGA
 	systemUnuse();
 	return pResult;
 }
 
 void _memFreeRls(void *pMem, ULONG ulSize) {
 	systemUse();
-	#ifdef AMIGA
 	FreeMem(pMem, ulSize);
-	#else
-	free(pMem);
-	#endif // AMIGA
 	systemUnuse();
 }
 
