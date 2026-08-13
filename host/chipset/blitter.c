@@ -172,17 +172,21 @@ static void blitStandard(UWORD uwBltSize) {
 				rd = (ULONG)((LONG)rd + step);
 			}
 		}
-		if(useA) {
-			pa = (ULONG)((LONG)ra + amod);
-		}
-		if(useB) {
-			pb = (ULONG)((LONG)rb + bmod);
-		}
-		if(useC) {
-			pc = (ULONG)((LONG)rc + cmod);
-		}
-		if(useD) {
-			pd = (ULONG)((LONG)rd + dmod);
+		/* DESC: HRM — modulo is subtracted rather than added. */
+		{
+			LONG ms = desc ? -1 : 1;
+			if(useA) {
+				pa = (ULONG)((LONG)ra + ms * (LONG)amod);
+			}
+			if(useB) {
+				pb = (ULONG)((LONG)rb + ms * (LONG)bmod);
+			}
+			if(useC) {
+				pc = (ULONG)((LONG)rc + ms * (LONG)cmod);
+			}
+			if(useD) {
+				pd = (ULONG)((LONG)rd + ms * (LONG)dmod);
+			}
 		}
 	}
 	c->bltapt = (APTR)pa;

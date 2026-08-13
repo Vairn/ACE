@@ -376,7 +376,7 @@ void gsTestBufferReuseCreate(void) {
 		s_pFullPalette[i] = s_pVPort->pPalette[i];
 	}
 
-	s_pFont = fontCreateFromPath("data/fonts/silkscreen.fnt");
+	s_pFont = fontCreateFromPath("data/silkscreen.fnt");
 	s_pTextBm = fontCreateTextBitMap(320, s_pFont->uwHeight);
 	bufferReuseDrawSimpleScreen();
 

@@ -127,6 +127,7 @@ int chipsetTimingOk(void);
 
 void aceHostFireInts(void);
 void aceHostPump(void);
+void aceHostTick(void);
 
 #ifdef __cplusplus
 }

@@ -118,15 +118,9 @@ tScrollBufferManager *scrollBufferCreate(void *pTags, ...) {
 
 	tBitMap *pCustomFront = (tBitMap*)tagGet(pTags, vaTags, TAG_SCROLLBUFFER_FRONT_BITMAP, 0);
 	tBitMap *pCustomBack = (tBitMap*)tagGet(pTags, vaTags, TAG_SCROLLBUFFER_BACK_BITMAP, 0);
-	scrollBufferReset(
-		pManager, ubMarginWidth, uwBoundWidth, uwBoundHeight,
-		ubBitmapFlags, isDblBuf, pCustomFront, pCustomBack
-	);
 
-	// Must be before camera? Shouldn't be as there are priorities on manager list
-	vPortAddManager(pVPort, (tVpManager*)pManager);
-
-	// Find camera manager, create if not exists
+	// Camera must exist before scrollBufferReset(): that calls scrollBufferProcess
+	// which reads pCamera. Amiga often survives a NULL read at addr 0; the host does not.
 	pManager->pCamera = (tCameraManager*)vPortGetManager(pVPort, VPM_CAMERA);
 	if(!pManager->pCamera) {
 		pManager->pCamera = cameraCreate(
@@ -135,10 +129,15 @@ tScrollBufferManager *scrollBufferCreate(void *pTags, ...) {
 		isCameraCreated = 1;
 	}
 	else {
-		cameraReset(pManager->pCamera, 0,0, uwBoundWidth, uwBoundHeight, isDblBuf);
+		cameraReset(pManager->pCamera, 0, 0, uwBoundWidth, uwBoundHeight, isDblBuf);
 	}
 
-	// TODO: Update copperlist with current camera pos?
+	scrollBufferReset(
+		pManager, ubMarginWidth, uwBoundWidth, uwBoundHeight,
+		ubBitmapFlags, isDblBuf, pCustomFront, pCustomBack
+	);
+
+	vPortAddManager(pVPort, (tVpManager*)pManager);
 
 	va_end(vaTags);
 	logBlockEnd("scrollBufferCreate");

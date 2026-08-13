@@ -19,6 +19,9 @@
 #include "test/twister.h"
 #include "test/simple_buffer_bpp.h"
 #include "test/scroll_tile_buffer.h"
+#ifdef ACE_HOST
+#include <ace_host/chipset.h>
+#endif
 
 tStateManager *g_pGameStateManager = 0;
 tState g_pTestStates[TEST_STATE_COUNT] = {
@@ -53,6 +56,9 @@ void genericProcess(void) {
 	keyProcess();
 
     stateProcess(g_pGameStateManager);
+#ifdef ACE_HOST
+	aceHostTick();
+#endif
 }
 
 void genericDestroy(void) {

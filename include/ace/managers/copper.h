@@ -259,38 +259,45 @@ void copMove(
  * @param pWaitCmd Pointer to copper command to be modified.
  * @param ubX WAIT cmd's X position.
  * @param ubY Ditto, Y.
+ *
+ * @see copSetMove()
  */
+#ifdef ACE_HOST
+static inline void copCmdWriteIr(tCopCmd *pCmd, UWORD uwIr1, UWORD uwIr2) {
+	UBYTE *b = (UBYTE *)pCmd;
+	b[0] = (UBYTE)(uwIr1 >> 8);
+	b[1] = (UBYTE)uwIr1;
+	b[2] = (UBYTE)(uwIr2 >> 8);
+	b[3] = (UBYTE)uwIr2;
+}
+
+static inline void copSetWait(tCopWaitCmd *pWaitCmd, UBYTE ubX, UBYTE ubY) {
+	copCmdWriteIr(
+		(tCopCmd *)pWaitCmd,
+		(UWORD)(((UWORD)ubY << 8) | ((UWORD)(ubX >> 1) << 1) | 1u),
+		0xFFFE
+	);
+}
+
+static inline void copSetMove(tCopMoveCmd *pMoveCmd, volatile void *pReg, UWORD uwValue) {
+	UWORD uwDest = (UWORD)((ULONG)pReg - (ULONG)((UBYTE *)g_pCustom));
+	copCmdWriteIr((tCopCmd *)pMoveCmd, (UWORD)(uwDest & 0x1FE), uwValue);
+}
+
+static inline void copSetMoveVal(tCopMoveCmd *pMoveCmd, UWORD uwValue) {
+	UBYTE *b = (UBYTE *)pMoveCmd;
+	b[2] = (UBYTE)(uwValue >> 8);
+	b[3] = (UBYTE)uwValue;
+}
+#else
 void copSetWait(tCopWaitCmd *pWaitCmd, UBYTE ubX, UBYTE ubY);
 
-/**
- * @brief Prepares MOVE command on given memory address.
- *
- * @note This fn is relatively slow for editing copperlist, since it builds
- * whole WAIT cmd from scratch.
- * If you exactly know what you're doing, you can just adjust wait pos
- * of already generated WAIT cmd and omit applying same values to rest of fields.
- *
- * @param pMoveCmd Pointer to copper command to be modified.
- * @param pReg Custom chip register address to be set
- * @param uwValue New register's value.
- *
- * @see copSetMoveVal()
- */
 void copSetMove(tCopMoveCmd *pMoveCmd, volatile void *pReg, UWORD uwValue);
 
-/**
- * @brief Sets the MOVE command target value to a new one.
- * This is way faster than calling copSetMove() repeatedly if you're just
- * changing the value.
- *
- * @param pMoveCmd Pointer to copper command to be modified.
- * @param uwValue  New register's value. The target register doesn't change.
- *
- * @see copSetMoveVal()
- */
 static inline void copSetMoveVal(tCopMoveCmd *pMoveCmd, UWORD uwValue) {
 	pMoveCmd->bfValue = uwValue;
 }
+#endif
 
 #endif // AMIGA
 

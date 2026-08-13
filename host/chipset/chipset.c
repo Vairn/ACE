@@ -17,6 +17,8 @@ static UWORD s_uwIntena;
 static UWORD s_uwIntreq;
 static int s_inChipset;
 static int s_frameReady;
+static int s_vblankThisTick;
+static int s_blitWait;
 static int s_eClockAcc;
 static int s_bplBusyRemain;
 static int s_copSlotRemain;
@@ -36,7 +38,8 @@ static ULONG s_ulCopPc;
 static int s_copHalted;
 static int s_copWaiting;
 static int s_copSkip;
-static tCopWaitCmd s_copWait;
+static UWORD s_copWaitIr1;
+static UWORD s_copWaitIr2;
 
 static UWORD s_fb[ACE_HOST_FB_WIDTH * ACE_HOST_FB_HEIGHT_PAL];
 static UBYTE s_lineDma[ACE_HOST_SLOTS_PER_LINE];
@@ -143,40 +146,28 @@ static void copperJump(ULONG ulLc) {
 	s_copSkip = 0;
 }
 
-static int copperReached(const tCopWaitCmd *pW) {
-	UWORD ve = pW->bfVE;
-	UWORD he = pW->bfHE;
-	UWORD vy = (UWORD)(s_uwVpos & 0xFF);
-	UWORD hy = (UWORD)(s_uwHpos >> 1);
-	UWORD wy = pW->bfWaitY;
-	UWORD wx = pW->bfWaitX;
-	if(!pW->bfBlitterIgnore && blitterBusy()) {
+static int copperReached(UWORD uwIr1, UWORD uwIr2) {
+	/* OCS: VE is VP6–VP0 (IR2 bits 14–8). VP7 cannot be masked (HRM / WinUAE). */
+	UWORD vmask = (UWORD)(((uwIr2 >> 8) & 0x7F) | 0x80);
+	UWORD hmask = (UWORD)(uwIr2 & 0xFE);
+	UWORD vp = (UWORD)(s_uwVpos & vmask);
+	UWORD hp = (UWORD)(s_uwHpos & hmask);
+	UWORD vcmp = (UWORD)((uwIr1 & (uwIr2 | 0x8000u)) >> 8);
+	UWORD hcmp = (UWORD)(uwIr1 & hmask);
+	if(!(uwIr2 & 0x8000) && blitterBusy()) {
 		return 0;
 	}
-	if((vy & ve) > (wy & ve)) {
-		return 1;
-	}
-	if((vy & ve) == (wy & ve) && (hy & he) >= (wx & he)) {
-		return 1;
-	}
-	return 0;
-}
-
-static int isTerminator(const tCopWaitCmd *pW) {
-	return pW->bfIsWait && !pW->bfIsSkip && pW->bfWaitY == 0xFF && pW->bfWaitX == 0x7F;
-}
-
-/* ACE WAIT/SKIP always set compare enables to 0x7F. On little-endian GCC,
- * MOVE dest>=$100 occupies the same bit as bfIsWait, so bitfields alone
- * cannot tell MOVE $108 from a WAIT. */
-static int copCmdIsWait(const tCopCmd *pCmd) {
-	if(!pCmd->sWait.bfIsWait) {
+	if(vp < vcmp) {
 		return 0;
 	}
-	if(pCmd->sWait.bfVE == 0x7F && pCmd->sWait.bfHE == 0x7F) {
+	if(vp > vcmp) {
 		return 1;
 	}
-	return isTerminator(&pCmd->sWait);
+	return hp >= hcmp;
+}
+
+static int isTerminator(UWORD uwIr1, UWORD uwIr2) {
+	return (uwIr1 & 1) && !(uwIr2 & 1) && uwIr1 == 0xFFFF;
 }
 
 static void customWriteUword(UWORD uwOffs, UWORD uwVal);
@@ -186,7 +177,7 @@ static void copperMove(UWORD uwDest, UWORD uwVal) {
 }
 
 static int copperTick(void) {
-	tCopCmd cmd;
+	UWORD uwIr1, uwIr2;
 	if(!(s_uwDmacon & DMAF_COPPER) || !(s_uwDmacon & DMAF_MASTER) || s_copHalted) {
 		return 0;
 	}
@@ -194,7 +185,7 @@ static int copperTick(void) {
 		return 0;
 	}
 	if(s_copWaiting) {
-		if(copperReached(&s_copWait)) {
+		if(copperReached(s_copWaitIr1, s_copWaitIr2)) {
 			s_copWaiting = 0;
 			s_lastCopWaitY = s_uwVpos;
 			if(s_copWaitHitN < 16) {
@@ -210,23 +201,25 @@ static int copperTick(void) {
 			s_copHalted = 1;
 			return 0;
 		}
-		memcpy(&cmd, p, sizeof(cmd));
+		uwIr1 = readChipWord(s_ulCopPc);
+		uwIr2 = readChipWord(s_ulCopPc + 2);
 	}
-	s_ulCopPc += sizeof(tCopCmd);
+	s_ulCopPc += 4;
 
-	if(copCmdIsWait(&cmd)) {
-		if(isTerminator(&cmd.sWait)) {
+	if(uwIr1 & 1) {
+		if(isTerminator(uwIr1, uwIr2)) {
 			s_copHalted = 1;
 			return 1;
 		}
-		if(cmd.sWait.bfIsSkip) {
-			if(copperReached(&cmd.sWait)) {
+		if(uwIr2 & 1) {
+			if(copperReached(uwIr1, uwIr2)) {
 				s_copSkip = 1;
 			}
 			return 1;
 		}
-		s_copWait = cmd.sWait;
-		if(!copperReached(&s_copWait)) {
+		s_copWaitIr1 = uwIr1;
+		s_copWaitIr2 = uwIr2;
+		if(!copperReached(s_copWaitIr1, s_copWaitIr2)) {
 			s_copWaiting = 1;
 		}
 		else {
@@ -242,7 +235,7 @@ static int copperTick(void) {
 		s_copSkip = 0;
 		return 1;
 	}
-	copperMove((UWORD)cmd.sMove.bfDestAddr, (UWORD)cmd.sMove.bfValue);
+	copperMove((UWORD)(uwIr1 & 0x1FE), uwIr2);
 	return 1;
 }
 
@@ -692,8 +685,10 @@ static UWORD colorLookup(int idx) {
 }
 
 static void spriteFetchCtl(int ch) {
-	UWORD pos = readChipWord(s_sprPtr[ch]);
-	UWORD ctl = readChipWord(s_sprPtr[ch] + 2);
+	/* ACE writes POS/CTL as native UWORDs; CHIP DMA pixels stay Amiga BE. */
+	UWORD *p = (UWORD *)(uintptr_t)s_sprPtr[ch];
+	UWORD pos = p ? p[0] : 0;
+	UWORD ctl = p ? p[1] : 0;
 	s_sprPtr[ch] += 4;
 	g_pHostCustom->sprpt[ch] = (APTR)s_sprPtr[ch];
 	s_sprPos[ch] = pos;
@@ -1007,10 +1002,13 @@ void chipsetRunSlots(unsigned n) {
 	}
 	if(!nested) {
 		aceHostDispatchInts(s_uwIntreq);
-		if(s_frameReady) {
-			s_frameReady = 0;
-			aceHostOnVblank();
-		}
+	}
+	/* Present on vblank from the game loop, not from WaitBlit: a blit-wait
+	 * wrap would vsync-sleep the CPU path. Leave s_frameReady for aceHostTick. */
+	if(s_frameReady && !s_blitWait) {
+		s_frameReady = 0;
+		s_vblankThisTick = 1;
+		aceHostOnVblank();
 	}
 	s_inChipset--;
 	/* CIA-A serial after the beam step so key.c's 3-scanline SPMODE wait
@@ -1027,9 +1025,27 @@ void chipsetOnVposRead(void) {
 void chipsetWaitBlit(void) {
 	unsigned guard = 0;
 	chipsetSyncCpuWrites();
+	s_blitWait++;
 	while(blitterBusy() && guard++ < 4000000u) {
 		chipsetRunSlots(16);
 	}
+	s_blitWait--;
+}
+
+void aceHostTick(void) {
+	/* Real Agnus keeps scanning even if the game never WaitTOF. Without a
+	 * beam wait there is no vblank, so SDL never pumps and the window freezes. */
+	if(!s_vblankThisTick) {
+		if(s_frameReady) {
+			s_frameReady = 0;
+			s_vblankThisTick = 1;
+			aceHostOnVblank();
+		}
+		else {
+			chipsetRunSlots((unsigned)s_lines * ACE_HOST_SLOTS_PER_LINE);
+		}
+	}
+	s_vblankThisTick = 0;
 }
 
 int chipsetBlitBusyPeek(void) {
@@ -1149,29 +1165,30 @@ void chipsetCopperDisasm(char *pBuf, unsigned bufSize, unsigned maxInsns) {
 	}
 	pBuf[0] = 0;
 	while(n < maxInsns && off + 48 < bufSize && pc) {
-		tCopCmd cmd;
+		UWORD uwIr1, uwIr2;
 		const UBYTE *p = (const UBYTE *)(uintptr_t)pc;
 		if(!aceHostIsChipPtr(p)) {
 			break;
 		}
-		memcpy(&cmd, p, sizeof(cmd));
-		if(copCmdIsWait(&cmd)) {
+		uwIr1 = readChipWord(pc);
+		uwIr2 = readChipWord(pc + 2);
+		if(uwIr1 & 1) {
 			off += (unsigned)snprintf(
 				pBuf + off, bufSize - off, "%s %u,%u\n",
-				cmd.sWait.bfIsSkip ? "SKIP" : "WAIT",
-				cmd.sWait.bfWaitX << 1, cmd.sWait.bfWaitY
+				(uwIr2 & 1) ? "SKIP" : "WAIT",
+				((uwIr1 >> 1) & 0x7F) << 1, uwIr1 >> 8
 			);
-			if(isTerminator(&cmd.sWait)) {
+			if(isTerminator(uwIr1, uwIr2)) {
 				break;
 			}
 		}
 		else {
 			off += (unsigned)snprintf(
 				pBuf + off, bufSize - off, "MOVE %03X,%04X\n",
-				cmd.sMove.bfDestAddr, cmd.sMove.bfValue
+				uwIr1 & 0x1FE, uwIr2
 			);
 		}
-		pc += sizeof(tCopCmd);
+		pc += 4;
 		n++;
 	}
 }

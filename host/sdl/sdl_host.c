@@ -23,34 +23,13 @@ static SDL_Window *s_win;
 static SDL_Renderer *s_ren;
 static SDL_Texture *s_tex;
 static SDL_AudioDeviceID s_audio;
-static Uint32 s_lastPresent;
+static Uint64 s_paceFreq;
+static Uint64 s_nextPace;
+static int s_paceReady;
 
 static void audioCb(void *ud, Uint8 *stream, int len) {
 	(void)ud;
 	paulaMix((short *)stream, len / 4);
-}
-
-static UWORD joyEncode(int l, int r, int u, int d) {
-	UWORD dat = 0;
-	if(l) {
-		dat |= 0x200;
-	}
-	if(r) {
-		dat |= 0x002;
-	}
-	if(u) {
-		dat |= 0x100;
-	}
-	if(d) {
-		dat |= 0x001;
-	}
-	if(l && !u) {
-		dat |= 0x100;
-	}
-	if(r && !d) {
-		dat |= 0x001;
-	}
-	return dat;
 }
 
 static void initKeyMap(UBYTE *m) {
@@ -158,6 +137,14 @@ void aceHostSdlInit(int isPal) {
 	{
 		SDL_AudioSpec want, have;
 		int h = isPal ? ACE_HOST_FB_HEIGHT_PAL : ACE_HOST_FB_HEIGHT_NTSC;
+		int winW = ACE_HOST_FB_WIDTH * s_scale;
+		int winH = winW * 3 / 4; /* 4:3 CRT, not square-pixel 640x256 */
+#if SDL_VERSION_ATLEAST(2, 24, 0)
+		SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+#endif
+#ifdef SDL_HINT_WINDOWS_DPI_SCALING
+		SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "0");
+#endif
 		if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) != 0) {
 			fprintf(stderr, "[ACE_HOST] SDL_Init: %s\n", SDL_GetError());
 			return;
@@ -165,9 +152,14 @@ void aceHostSdlInit(int isPal) {
 		s_win = SDL_CreateWindow(
 			"ACE host",
 			SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-			ACE_HOST_FB_WIDTH * s_scale, h * s_scale, SDL_WINDOW_RESIZABLE
+			winW, winH, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI
 		);
-		s_ren = SDL_CreateRenderer(s_win, -1, SDL_RENDERER_ACCELERATED);
+		s_ren = SDL_CreateRenderer(
+			s_win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
+		);
+		if(!s_ren) {
+			s_ren = SDL_CreateRenderer(s_win, -1, SDL_RENDERER_ACCELERATED);
+		}
 		if(!s_ren) {
 			s_ren = SDL_CreateRenderer(s_win, -1, 0);
 		}
@@ -187,7 +179,11 @@ void aceHostSdlInit(int isPal) {
 			SDL_PauseAudioDevice(s_audio, 0);
 		}
 		SDL_SetRelativeMouseMode(SDL_TRUE);
-		s_lastPresent = SDL_GetTicks();
+		s_paceFreq = SDL_GetPerformanceFrequency();
+		if(!s_paceFreq) {
+			s_paceFreq = 1000;
+		}
+		s_paceReady = 0;
 	}
 #else
 	fprintf(stderr, "[ACE_HOST] built without SDL2 — no window/audio\n");
@@ -253,14 +249,12 @@ void aceHostSdlPump(void) {
 void aceHostSdlApplyInput(void) {
 #ifdef ACE_HOST_HAS_SDL
 	const Uint8 *ks = SDL_GetKeyboardState(NULL);
-	int u = ks[SDL_SCANCODE_UP];
-	int d = ks[SDL_SCANCODE_DOWN];
-	int l = ks[SDL_SCANCODE_LEFT];
-	int r = ks[SDL_SCANCODE_RIGHT];
 	int fire = ks[SDL_SCANCODE_LCTRL] || ks[SDL_SCANCODE_RCTRL] || ks[SDL_SCANCODE_Z];
 	int fire2 = ks[SDL_SCANCODE_LALT] || ks[SDL_SCANCODE_X];
 	int m1 = SDL_GetMouseState(NULL, NULL);
-	s_joy1 = joyEncode(l, r, u, d);
+	/* Arrows are CIA keys only. Feeding them into joy1dat made menu
+	 * `keyUse(KEY_UP) || joyUse(JOY1_UP)` take two steps per press. */
+	s_joy1 = 0;
 	s_joy0 = (UWORD)(((UWORD)s_mouseY << 8) | s_mouseX);
 	s_fireMask = 0;
 	/* Port 2 (joy1dat / JOY1) fire is CIA FIR1; port 1 mouse LMB is FIR0. */
@@ -293,11 +287,46 @@ void aceHostSdlApplyInput(void) {
 
 #ifdef ACE_HOST_HAS_SDL
 static UWORD s_presentTmp[ACE_HOST_FB_WIDTH * ACE_HOST_FB_HEIGHT_PAL];
+
+/* Sleep until the next PAL (50 Hz) / NTSC (60 Hz) deadline. Vsync alone is
+ * not enough: a 60/144 Hz display would run the playfield too fast. */
+static void aceHostPaceVblank(void) {
+	unsigned hz;
+	Uint64 period, now;
+	hz = s_isPal ? 50u : 60u;
+	period = (s_paceFreq + (hz / 2u)) / hz;
+	if(!period) {
+		period = 1;
+	}
+	now = SDL_GetPerformanceCounter();
+	if(!s_paceReady) {
+		s_nextPace = now + period;
+		s_paceReady = 1;
+		return;
+	}
+	if(now < s_nextPace) {
+		Uint64 remainMs = (s_nextPace - now) * 1000u / s_paceFreq;
+		if(remainMs > 1u) {
+			SDL_Delay((Uint32)(remainMs - 1u));
+		}
+		while(SDL_GetPerformanceCounter() < s_nextPace) {
+		}
+		now = SDL_GetPerformanceCounter();
+	}
+	/* Skip catch-up frames after a hitch so the next wait is a full period. */
+	if(now >= s_nextPace + period) {
+		s_nextPace = now + period;
+	}
+	else {
+		s_nextPace += period;
+	}
+}
 #endif
 
 void aceHostSdlPresent(const UWORD *pFb, int width, int height) {
 #ifdef ACE_HOST_HAS_SDL
-	Uint32 now, target;
+	SDL_Rect dst;
+	int rw, rh;
 	if(!s_ren || !s_tex) {
 		return;
 	}
@@ -309,15 +338,23 @@ void aceHostSdlPresent(const UWORD *pFb, int width, int height) {
 		}
 	}
 	SDL_UpdateTexture(s_tex, NULL, s_presentTmp, width * (int)sizeof(UWORD));
-	SDL_RenderClear(s_ren);
-	SDL_RenderCopy(s_ren, s_tex, NULL, NULL);
-	SDL_RenderPresent(s_ren);
-	now = SDL_GetTicks();
-	target = 1000u / (s_isPal ? 50u : 60u);
-	if(now - s_lastPresent < target) {
-		SDL_Delay(target - (now - s_lastPresent));
+	SDL_GetRendererOutputSize(s_ren, &rw, &rh);
+	if(rw * 3 >= rh * 4) {
+		dst.h = rh;
+		dst.w = rh * 4 / 3;
+		dst.x = (rw - dst.w) / 2;
+		dst.y = 0;
 	}
-	s_lastPresent = SDL_GetTicks();
+	else {
+		dst.w = rw;
+		dst.h = rw * 3 / 4;
+		dst.x = 0;
+		dst.y = (rh - dst.h) / 2;
+	}
+	SDL_SetRenderDrawColor(s_ren, 0, 0, 0, 255);
+	SDL_RenderClear(s_ren);
+	SDL_RenderCopy(s_ren, s_tex, NULL, &dst);
+	SDL_RenderPresent(s_ren);
 #else
 	(void)pFb;
 	(void)width;
@@ -331,6 +368,9 @@ void aceHostOnVblank(void) {
 	aceHostSdlPump();
 	aceHostSdlApplyInput();
 	aceHostSdlPresent(fb, w, h);
+#ifdef ACE_HOST_HAS_SDL
+	aceHostPaceVblank();
+#endif
 }
 
 int aceHostPollQuit(void) {

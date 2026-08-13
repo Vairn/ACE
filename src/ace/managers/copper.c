@@ -575,6 +575,7 @@ void copMove(tCopList *pCopList, tCopBlock *pBlock, volatile void *pAddr, UWORD 
 	pCopList->ubStatus |= STATUS_UPDATE;
 }
 
+#ifndef ACE_HOST
 void copSetWait(tCopWaitCmd *pWaitCmd, UBYTE ubX, UBYTE ubY) {
 	pWaitCmd->bfWaitY         = ubY;
 	pWaitCmd->bfWaitX         = ubX >> 1;
@@ -590,5 +591,6 @@ void copSetMove(tCopMoveCmd *pMoveCmd, volatile void *pAddr, UWORD uwValue) {
 	pMoveCmd->bfDestAddr = (ULONG)pAddr - (ULONG)((UBYTE *)g_pCustom);
 	copSetMoveVal(pMoveCmd, uwValue);
 }
+#endif
 
 #endif // AMIGA
