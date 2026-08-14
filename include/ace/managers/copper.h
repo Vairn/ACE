@@ -281,9 +281,9 @@ static inline void copSetWait(tCopWaitCmd *pWaitCmd, UBYTE ubX, UBYTE ubY) {
 
 static inline void copSetMove(tCopMoveCmd *pMoveCmd, volatile void *pReg, UWORD uwValue) {
 	UWORD uwDest = (UWORD)(
-		(uintptr_t)pReg - (uintptr_t)((UBYTE *)g_pCustom)
+		((uintptr_t)pReg - (uintptr_t)((UBYTE *)g_pCustom)) & 0x1FE
 	);
-	copCmdWriteIr((tCopCmd *)pMoveCmd, (UWORD)(uwDest & 0x1FE), uwValue);
+	copCmdWriteIr((tCopCmd *)pMoveCmd, uwDest, uwValue);
 }
 
 static inline void copSetMoveVal(tCopMoveCmd *pMoveCmd, UWORD uwValue) {

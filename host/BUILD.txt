@@ -26,5 +26,7 @@ Flags:
   ACE_HOST_MEM_MODE (STRICT|VIRTUAL), ACE_HOST_CHIP_SIZE, ACE_HOST_FAST_SIZE,
   ACE_HOST_DEBUG, ACE_HOST_USE_VIRTUAL_JOYSTICK, ACE_DEBUG.
 
-Keys: F11 memory HUD, F12 DMA/copper/alloc overlay (ACE_HOST_DEBUG).
-Arrows = CIA keys. With ACE_HOST_USE_VIRTUAL_JOYSTICK: WASD/numpad/gamepad = JOY1DAT.
+Keys: F11 Video menu, F12 Host menu, Alt+Enter fullscreen cycle.
+Shift+F10 timing log, Shift+F11 memory HUD, Shift+F12 DMA overlay (ACE_HOST_DEBUG).
+ace_host.ini beside the exe. Arrows = CIA keys (eaten while a host menu is open).
+With ACE_HOST_USE_VIRTUAL_JOYSTICK: WASD/numpad/gamepad = JOY1DAT.

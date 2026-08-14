@@ -1,8 +1,9 @@
 #include "chipset_priv.h"
+#include "../sdl/host_chrome.h"
 #include <stdio.h>
 #include <string.h>
 
-/* Tiny 5x7 font for 0-9 A-Z space /:+- */
+/* Tiny 5x7 font: 0-9 then A-Z */
 static const unsigned char FONT[][7] = {
 	{0x0E,0x11,0x13,0x15,0x19,0x11,0x0E}, /* 0 */
 	{0x04,0x0C,0x04,0x04,0x04,0x04,0x0E},
@@ -14,11 +15,43 @@ static const unsigned char FONT[][7] = {
 	{0x1F,0x01,0x02,0x04,0x08,0x08,0x08},
 	{0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},
 	{0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C}, /* 9 */
+	{0x0E,0x11,0x11,0x1F,0x11,0x11,0x11}, /* A */
+	{0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E},
+	{0x0E,0x11,0x10,0x10,0x10,0x11,0x0E},
+	{0x1E,0x11,0x11,0x11,0x11,0x11,0x1E},
+	{0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F},
+	{0x1F,0x10,0x10,0x1E,0x10,0x10,0x10},
+	{0x0E,0x11,0x10,0x17,0x11,0x11,0x0F},
+	{0x11,0x11,0x11,0x1F,0x11,0x11,0x11},
+	{0x0E,0x04,0x04,0x04,0x04,0x04,0x0E},
+	{0x01,0x01,0x01,0x01,0x11,0x11,0x0E},
+	{0x11,0x12,0x14,0x18,0x14,0x12,0x11},
+	{0x10,0x10,0x10,0x10,0x10,0x10,0x1F},
+	{0x11,0x1B,0x15,0x15,0x11,0x11,0x11},
+	{0x11,0x19,0x15,0x13,0x11,0x11,0x11},
+	{0x0E,0x11,0x11,0x11,0x11,0x11,0x0E},
+	{0x1E,0x11,0x11,0x1E,0x10,0x10,0x10},
+	{0x0E,0x11,0x11,0x11,0x15,0x12,0x0D},
+	{0x1E,0x11,0x11,0x1E,0x14,0x12,0x11},
+	{0x0E,0x11,0x10,0x0E,0x01,0x11,0x0E},
+	{0x1F,0x04,0x04,0x04,0x04,0x04,0x04},
+	{0x11,0x11,0x11,0x11,0x11,0x11,0x0E},
+	{0x11,0x11,0x11,0x11,0x11,0x0A,0x04},
+	{0x11,0x11,0x11,0x15,0x15,0x1B,0x11},
+	{0x11,0x11,0x0A,0x04,0x0A,0x11,0x11},
+	{0x11,0x11,0x0A,0x04,0x04,0x04,0x04},
+	{0x1F,0x01,0x02,0x04,0x08,0x10,0x1F}  /* Z */
 };
 
 static int glyphIndex(char ch) {
 	if(ch >= '0' && ch <= '9') {
 		return ch - '0';
+	}
+	if(ch >= 'A' && ch <= 'Z') {
+		return 10 + (ch - 'A');
+	}
+	if(ch >= 'a' && ch <= 'z') {
+		return 10 + (ch - 'a');
 	}
 	return -1;
 }
@@ -52,77 +85,23 @@ static void drawChar(UWORD *fb, int w, int h, int x, int y, char ch, UWORD c) {
 	else if(ch == '-') {
 		rows[3] = 0x1F;
 	}
-	else if(ch == 'K') {
-		rows[0]=0x11; rows[1]=0x12; rows[2]=0x14; rows[3]=0x18; rows[4]=0x14; rows[5]=0x12; rows[6]=0x11;
+	else if(ch == '=') {
+		rows[2] = 0x1F; rows[4] = 0x1F;
 	}
-	else if(ch == 'M') {
-		rows[0]=0x11; rows[1]=0x1B; rows[2]=0x15; rows[3]=0x15; rows[4]=0x11; rows[5]=0x11; rows[6]=0x11;
+	else if(ch == '_') {
+		rows[6] = 0x1F;
 	}
-	else if(ch == 'C') {
-		rows[0]=0x0E; rows[1]=0x11; rows[2]=0x10; rows[3]=0x10; rows[4]=0x10; rows[5]=0x11; rows[6]=0x0E;
+	else if(ch == '(') {
+		rows[1]=0x04; rows[2]=0x08; rows[3]=0x08; rows[4]=0x08; rows[5]=0x04;
 	}
-	else if(ch == 'H') {
-		rows[0]=0x11; rows[1]=0x11; rows[2]=0x11; rows[3]=0x1F; rows[4]=0x11; rows[5]=0x11; rows[6]=0x11;
-	}
-	else if(ch == 'I') {
-		rows[0]=0x0E; rows[1]=0x04; rows[2]=0x04; rows[3]=0x04; rows[4]=0x04; rows[5]=0x04; rows[6]=0x0E;
-	}
-	else if(ch == 'P') {
-		rows[0]=0x1E; rows[1]=0x11; rows[2]=0x11; rows[3]=0x1E; rows[4]=0x10; rows[5]=0x10; rows[6]=0x10;
-	}
-	else if(ch == 'F') {
-		rows[0]=0x1F; rows[1]=0x10; rows[2]=0x10; rows[3]=0x1E; rows[4]=0x10; rows[5]=0x10; rows[6]=0x10;
-	}
-	else if(ch == 'A') {
-		rows[0]=0x0E; rows[1]=0x11; rows[2]=0x11; rows[3]=0x1F; rows[4]=0x11; rows[5]=0x11; rows[6]=0x11;
-	}
-	else if(ch == 'S') {
-		rows[0]=0x0E; rows[1]=0x11; rows[2]=0x10; rows[3]=0x0E; rows[4]=0x01; rows[5]=0x11; rows[6]=0x0E;
-	}
-	else if(ch == 'T') {
-		rows[0]=0x1F; rows[1]=0x04; rows[2]=0x04; rows[3]=0x04; rows[4]=0x04; rows[5]=0x04; rows[6]=0x04;
-	}
-	else if(ch == 'R') {
-		rows[0]=0x1E; rows[1]=0x11; rows[2]=0x11; rows[3]=0x1E; rows[4]=0x14; rows[5]=0x12; rows[6]=0x11;
-	}
-	else if(ch == 'O') {
-		rows[0]=0x0E; rows[1]=0x11; rows[2]=0x11; rows[3]=0x11; rows[4]=0x11; rows[5]=0x11; rows[6]=0x0E;
-	}
-	else if(ch == 'V') {
-		rows[0]=0x11; rows[1]=0x11; rows[2]=0x11; rows[3]=0x11; rows[4]=0x11; rows[5]=0x0A; rows[6]=0x04;
-	}
-	else if(ch == 'B') {
-		rows[0]=0x1E; rows[1]=0x11; rows[2]=0x11; rows[3]=0x1E; rows[4]=0x11; rows[5]=0x11; rows[6]=0x1E;
-	}
-	else if(ch == 'Y') {
-		rows[0]=0x11; rows[1]=0x11; rows[2]=0x0A; rows[3]=0x04; rows[4]=0x04; rows[5]=0x04; rows[6]=0x04;
-	}
-	else if(ch == 'X') {
-		rows[0]=0x11; rows[1]=0x11; rows[2]=0x0A; rows[3]=0x04; rows[4]=0x0A; rows[5]=0x11; rows[6]=0x11;
-	}
-	else if(ch == 'D') {
-		rows[0]=0x1E; rows[1]=0x11; rows[2]=0x11; rows[3]=0x11; rows[4]=0x11; rows[5]=0x11; rows[6]=0x1E;
-	}
-	else if(ch == 'E') {
-		rows[0]=0x1F; rows[1]=0x10; rows[2]=0x10; rows[3]=0x1E; rows[4]=0x10; rows[5]=0x10; rows[6]=0x1F;
-	}
-	else if(ch == 'N') {
-		rows[0]=0x11; rows[1]=0x19; rows[2]=0x15; rows[3]=0x13; rows[4]=0x11; rows[5]=0x11; rows[6]=0x11;
-	}
-	else if(ch == 'G') {
-		rows[0]=0x0E; rows[1]=0x11; rows[2]=0x10; rows[3]=0x17; rows[4]=0x11; rows[5]=0x11; rows[6]=0x0E;
-	}
-	else if(ch == 'U') {
-		rows[0]=0x11; rows[1]=0x11; rows[2]=0x11; rows[3]=0x11; rows[4]=0x11; rows[5]=0x11; rows[6]=0x0E;
-	}
-	else if(ch == 'L') {
-		rows[0]=0x10; rows[1]=0x10; rows[2]=0x10; rows[3]=0x10; rows[4]=0x10; rows[5]=0x10; rows[6]=0x1F;
-	}
-	else if(ch == 'W') {
-		rows[0]=0x11; rows[1]=0x11; rows[2]=0x11; rows[3]=0x15; rows[4]=0x15; rows[5]=0x1B; rows[6]=0x11;
+	else if(ch == ')') {
+		rows[1]=0x08; rows[2]=0x04; rows[3]=0x04; rows[4]=0x04; rows[5]=0x08;
 	}
 	else if(ch == '.') {
 		rows[5] = 0x04; rows[6] = 0x04;
+	}
+	else if(ch == '*') {
+		rows[1]=0x15; rows[2]=0x0E; rows[3]=0x04; rows[4]=0x0E; rows[5]=0x15;
 	}
 	for(gy = 0; gy < 7; ++gy) {
 		for(gx = 0; gx < 5; ++gx) {
@@ -133,7 +112,16 @@ static void drawChar(UWORD *fb, int w, int h, int x, int y, char ch, UWORD c) {
 	}
 }
 
-static void drawStr(UWORD *fb, int w, int h, int x, int y, const char *s, UWORD c) {
+void aceHostOverlayFill(UWORD *fb, int w, int h, int x, int y, int bw, int bh, UWORD c) {
+	int i, j;
+	for(j = 0; j < bh; ++j) {
+		for(i = 0; i < bw; ++i) {
+			plotHud(fb, w, h, x + i, y + j, c);
+		}
+	}
+}
+
+void aceHostOverlayDrawStr(UWORD *fb, int w, int h, int x, int y, const char *s, UWORD c) {
 	while(*s) {
 		drawChar(fb, w, h, x, y, *s, c);
 		x += 6;
@@ -171,7 +159,7 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 	static int s_bannerFrames;
 
 	if(aceHostOverBudgetBanner()) {
-		drawStr(pFb, width, height, 2, y, "OVER BUDGET", red);
+		aceHostOverlayDrawStr(pFb, width, height, 2, y, "OVER BUDGET", red);
 		y += 8;
 		s_bannerFrames++;
 		if(s_bannerFrames > 150) {
@@ -183,20 +171,20 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 	snprintf(line, sizeof(line), "%s %s",
 		aceHostMachineName(),
 		aceHostMemMode() == ACE_HOST_MEM_VIRTUAL ? "VIRTUAL" : "STRICT");
-	drawStr(pFb, width, height, 2, y, line, white);
+	aceHostOverlayDrawStr(pFb, width, height, 2, y, line, white);
 	y += 8;
 
 	snprintf(line, sizeof(line), "CHIP %lu/%luK PK%luK FR%luK",
 		(unsigned long)(chipU / 1024u), (unsigned long)(chipB / 1024u),
 		(unsigned long)(chipP / 1024u), (unsigned long)(chipF / 1024u));
-	drawStr(pFb, width, height, 2, y, line, over && aceHostChipOverBudget() ? red : white);
+	aceHostOverlayDrawStr(pFb, width, height, 2, y, line, over && aceHostChipOverBudget() ? red : white);
 	bar(pFb, width, height, 280, y, 80, 7, chipU, chipB ? chipB : 1, aceHostChipOverBudget());
 	y += 8;
 
 	snprintf(line, sizeof(line), "FAST %lu/%luK PK%luK FR%luK",
 		(unsigned long)(fastU / 1024u), (unsigned long)(fastB / 1024u),
 		(unsigned long)(fastP / 1024u), (unsigned long)(fastF / 1024u));
-	drawStr(pFb, width, height, 2, y, line, aceHostFastOverBudget() ? red : white);
+	aceHostOverlayDrawStr(pFb, width, height, 2, y, line, aceHostFastOverBudget() ? red : white);
 	bar(pFb, width, height, 280, y, 80, 7, fastU, fastB ? fastB : 1, aceHostFastOverBudget());
 	y += 8;
 
@@ -205,7 +193,7 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 		LONG dFast = (LONG)fastU - (LONG)fastB;
 		LONG d = dChip > 0 ? dChip : dFast;
 		snprintf(line, sizeof(line), "OVER +%ldK", (long)(d / 1024));
-		drawStr(pFb, width, height, 2, y, line, red);
+		aceHostOverlayDrawStr(pFb, width, height, 2, y, line, red);
 		y += 8;
 	}
 
@@ -213,13 +201,13 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 		chipsetVpos(), chipsetHpos(), chipsetDmacon(),
 		chipsetBlitBusyPeek() ? "BBUSY" : "BIDLE",
 		(unsigned long)chipsetCopperPc());
-	drawStr(pFb, width, height, 2, y, line, yellow);
+	aceHostOverlayDrawStr(pFb, width, height, 2, y, line, yellow);
 	y += 8;
 	snprintf(line, sizeof(line), "LN%u CW%u BLIT%u %s",
 		chipsetLinesLastFrame(),
 		chipsetLastCopWaitY(), chipsetBlitSlotsLastFrame(),
 		chipsetTimingOk() ? "OK" : "BAD");
-	drawStr(pFb, width, height, 2, y, line, chipsetTimingOk() ? white : red);
+	aceHostOverlayDrawStr(pFb, width, height, 2, y, line, chipsetTimingOk() ? white : red);
 
 	if(aceHostHudFull()) {
 		const UBYTE *dma = chipsetLastLineDma();
@@ -227,7 +215,7 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 		unsigned nalloc, ai;
 		ULONG chipSz = aceHostChipSize();
 		y += 10;
-		drawStr(pFb, width, height, 2, y, "DMA", white);
+		aceHostOverlayDrawStr(pFb, width, height, 2, y, "DMA", white);
 		y += 8;
 		for(i = 0; i < ACE_HOST_SLOTS_PER_LINE && i < width - 4; ++i) {
 			UWORD col = 0x2104;
@@ -245,7 +233,7 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 			plotHud(pFb, width, height, 2 + i, y + 1, col);
 		}
 		y += 4;
-		drawStr(pFb, width, height, 2, y, "CHIP MAP", cyan);
+		aceHostOverlayDrawStr(pFb, width, height, 2, y, "CHIP MAP", cyan);
 		y += 8;
 		{
 			int bw = width - 8;
@@ -284,7 +272,7 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 			}
 		}
 		y += 6;
-		drawStr(pFb, width, height, 2, y, "ALLOCS", cyan);
+		aceHostOverlayDrawStr(pFb, width, height, 2, y, "ALLOCS", cyan);
 		y += 8;
 		nalloc = aceHostAllocCount();
 		for(ai = 0; ai < nalloc && ai < 8 && y < height - 16; ++ai) {
@@ -296,7 +284,7 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 				inf.isChip ? "C" : "F",
 				(unsigned long)inf.ulAddr,
 				(unsigned long)inf.ulSize);
-			drawStr(pFb, width, height, 2, y, line, white);
+			aceHostOverlayDrawStr(pFb, width, height, 2, y, line, white);
 			y += 8;
 		}
 		{
@@ -309,7 +297,7 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 					if(nl) {
 						*nl = 0;
 					}
-					drawStr(pFb, width, height, 2, y, p, white);
+					aceHostOverlayDrawStr(pFb, width, height, 2, y, p, white);
 					y += 8;
 					if(!nl) {
 						break;

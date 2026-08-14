@@ -33,6 +33,7 @@ static int16_t s_ringR[RING];
 static volatile unsigned s_rHead, s_rTail;
 static int s_mixAcc;
 static int s_outRate = 44100;
+static int s_hostVol = 10;
 
 static ULONG ptrOf(APTR a) {
 	ULONG p = (ULONG)a;
@@ -68,6 +69,16 @@ void paulaSetOutputRate(int hz) {
 	if(hz > 0) {
 		s_outRate = hz;
 	}
+}
+
+void paulaSetHostVolume(int vol0to10) {
+	if(vol0to10 < 0) {
+		vol0to10 = 0;
+	}
+	if(vol0to10 > 10) {
+		vol0to10 = 10;
+	}
+	s_hostVol = vol0to10;
 }
 
 void paulaOnDmaEnable(UWORD uwOld, UWORD uwNew) {
@@ -197,8 +208,8 @@ void paulaMix(short *pOut, int nFrames) {
 			r = s_ringR[tail];
 			s_rTail = (tail + 1u) % RING;
 		}
-		pOut[f * 2] = (short)l;
-		pOut[f * 2 + 1] = (short)r;
+		pOut[f * 2] = (short)((l * s_hostVol) / 10);
+		pOut[f * 2 + 1] = (short)((r * s_hostVol) / 10);
 	}
 }
 

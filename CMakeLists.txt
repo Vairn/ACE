@@ -210,6 +210,9 @@ if(ACE_HOST)
 		host/src/chipset/paula.c
 		host/src/system_host.c
 		host/src/sdl/sdl_host.c
+		host/src/sdl/settings.c
+		host/src/sdl/scale2x.c
+		host/src/sdl/hqx.c
 		host/src/debug/hud.c
 		host/src/debug/crash.c
 		host/src/mixer/mixer.c

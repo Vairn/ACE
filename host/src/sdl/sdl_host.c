@@ -1,5 +1,6 @@
 #include "chipset_priv.h"
 #include "host_os.h"
+#include "host_chrome.h"
 #include <ace/managers/key.h>
 #include <ace/managers/game.h>
 #include <stdio.h>
@@ -12,10 +13,9 @@
 
 static int s_hudOn = 1;
 static int s_hudFull;
-static int s_scale = 2;
 static int s_quit;
 static int s_isPal = 1;
-static int s_noPace;
+static int s_envNoPace;
 static int s_headless;
 static int s_autoKeyFrame = -1;
 static int s_autoKeyUpFrame = -1;
@@ -26,12 +26,15 @@ static UWORD s_joy0, s_joy1;
 static UWORD s_pot = 0xFFFF;
 static UBYTE s_fireMask;
 static UBYTE s_mouseX, s_mouseY;
+static char s_iniPath[1024];
 
 #ifdef ACE_HOST_HAS_SDL
 static SDL_Window *s_win;
 static SDL_Renderer *s_ren;
 static SDL_Texture *s_tex;
 static SDL_AudioDeviceID s_audio;
+static int s_texW, s_texH;
+static UWORD s_scaleBuf[ACE_HOST_FB_WIDTH * 3 * ACE_HOST_FB_HEIGHT_PAL * 3];
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 static SDL_GameController *s_pad;
 #endif
@@ -152,22 +155,28 @@ static void syncKeysFromSdl(void) {
 		return;
 	}
 	memset(down, 0, sizeof(down));
-	for(sc = 0; sc < SDL_NUM_SCANCODES; ++sc) {
-		UBYTE ami;
-		if(!ks[sc]) {
-			continue;
-		}
-		if(sc == SDL_SCANCODE_F10 || sc == SDL_SCANCODE_F11 || sc == SDL_SCANCODE_F12) {
-			continue;
-		}
+	if(!aceHostMenuIsOpen()) {
+		int alt = ks[SDL_SCANCODE_LALT] || ks[SDL_SCANCODE_RALT];
+		for(sc = 0; sc < SDL_NUM_SCANCODES; ++sc) {
+			UBYTE ami;
+			if(!ks[sc]) {
+				continue;
+			}
+			if(sc == SDL_SCANCODE_F10 || sc == SDL_SCANCODE_F11 || sc == SDL_SCANCODE_F12) {
+				continue;
+			}
+			if(alt) {
+				continue;
+			}
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
-		if(isVirtualJoyKey((SDL_Scancode)sc)) {
-			continue;
-		}
+			if(aceHostSettings()->virtualJoy && isVirtualJoyKey((SDL_Scancode)sc)) {
+				continue;
+			}
 #endif
-		ami = amiKey((SDL_Scancode)sc);
-		if(ami < KEY_COUNT) {
-			down[ami] = 1;
+			ami = amiKey((SDL_Scancode)sc);
+			if(ami < KEY_COUNT) {
+				down[ami] = 1;
+			}
 		}
 	}
 	for(i = 0; i < KEY_COUNT; ++i) {
@@ -251,6 +260,152 @@ static void openFirstPad(void) {
 	}
 }
 #endif
+
+static int fbHeight(void) {
+	return s_isPal ? ACE_HOST_FB_HEIGHT_PAL : ACE_HOST_FB_HEIGHT_NTSC;
+}
+
+static int noPaceNow(void) {
+	return s_envNoPace || !aceHostSettings()->pace;
+}
+
+static void aspectUnit(int *uw, int *uh) {
+	tAceHostSettings *s = aceHostSettings();
+	*uw = ACE_HOST_FB_WIDTH;
+	if(s->aspect == ACE_HOST_ASPECT_SQUARE) {
+		*uh = fbHeight();
+	}
+	else {
+		*uh = ACE_HOST_FB_WIDTH * 3 / 4;
+	}
+}
+
+static int filterInteger(void) {
+	tAceHostSettings *s = aceHostSettings();
+	if(aceHostMenuIsOpen()) {
+		return 1;
+	}
+	if(s->filter == ACE_HOST_FILTER_HQ3X) {
+		return 3;
+	}
+	if(s->filter == ACE_HOST_FILTER_SCALE2X || s->filter == ACE_HOST_FILTER_HQ2X) {
+		return 2;
+	}
+	if(s->filter == ACE_HOST_FILTER_NEAREST && s->scanlines) {
+		return 2;
+	}
+	return 1;
+}
+
+static void createHostTexture(void) {
+	tAceHostSettings *s = aceHostSettings();
+	int n = filterInteger();
+	int nativeH = fbHeight();
+	if(s_tex) {
+		SDL_DestroyTexture(s_tex);
+		s_tex = 0;
+	}
+	s_texW = ACE_HOST_FB_WIDTH * n;
+	s_texH = nativeH * n;
+	if(!s_ren) {
+		return;
+	}
+	s_tex = SDL_CreateTexture(
+		s_ren, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STREAMING,
+		s_texW, s_texH
+	);
+#if SDL_VERSION_ATLEAST(2, 0, 12)
+	if(s_tex) {
+		SDL_ScaleMode mode = (!aceHostMenuIsOpen() && s->filter == ACE_HOST_FILTER_LINEAR) ?
+			SDL_ScaleModeLinear : SDL_ScaleModeNearest;
+		SDL_SetTextureScaleMode(s_tex, mode);
+	}
+#endif
+}
+
+static void recreateHostRenderer(void) {
+	tAceHostSettings *s = aceHostSettings();
+	Uint32 flags = SDL_RENDERER_ACCELERATED;
+	if(s->vsync) {
+		flags |= SDL_RENDERER_PRESENTVSYNC;
+	}
+	if(s_tex) {
+		SDL_DestroyTexture(s_tex);
+		s_tex = 0;
+	}
+	if(s_ren) {
+		SDL_DestroyRenderer(s_ren);
+		s_ren = 0;
+	}
+	if(!s_win) {
+		return;
+	}
+	s_ren = SDL_CreateRenderer(s_win, -1, flags);
+	if(!s_ren) {
+		s_ren = SDL_CreateRenderer(s_win, -1, SDL_RENDERER_ACCELERATED);
+	}
+	if(!s_ren) {
+		s_ren = SDL_CreateRenderer(s_win, -1, 0);
+	}
+	createHostTexture();
+}
+
+static void applyWindowSize(void) {
+	tAceHostSettings *s = aceHostSettings();
+	int uw, uh;
+	if(!s_win || s->fullscreen != ACE_HOST_FS_OFF) {
+		return;
+	}
+	aspectUnit(&uw, &uh);
+	SDL_SetWindowSize(s_win, uw * s->scale, uh * s->scale);
+	SDL_SetWindowPosition(s_win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+}
+
+static void applyFullscreen(void) {
+	tAceHostSettings *s = aceHostSettings();
+	Uint32 flag = 0;
+	if(!s_win) {
+		return;
+	}
+	if(s->fullscreen == ACE_HOST_FS_BORDERLESS) {
+		flag = SDL_WINDOW_FULLSCREEN_DESKTOP;
+	}
+	else if(s->fullscreen == ACE_HOST_FS_EXCLUSIVE) {
+		flag = SDL_WINDOW_FULLSCREEN;
+	}
+	SDL_SetWindowFullscreen(s_win, flag);
+	if(s->fullscreen == ACE_HOST_FS_OFF) {
+		applyWindowSize();
+	}
+}
+
+static void applyChrome(int bits) {
+	if(!bits) {
+		return;
+	}
+	if(bits & ACE_HOST_CHROME_APPLY_RENDER) {
+		recreateHostRenderer();
+	}
+	else if(bits & ACE_HOST_CHROME_APPLY_TEXTURE) {
+		createHostTexture();
+	}
+	if(bits & ACE_HOST_CHROME_APPLY_WINDOW) {
+		applyFullscreen();
+	}
+	paulaSetHostVolume(aceHostSettings()->volume);
+	if(s_iniPath[0]) {
+		aceHostSettingsSave(s_iniPath);
+	}
+}
+
+static void resolveIniPath(void) {
+	char *base = SDL_GetBasePath();
+	s_iniPath[0] = 0;
+	if(base) {
+		snprintf(s_iniPath, sizeof(s_iniPath), "%sace_host.ini", base);
+		SDL_free(base);
+	}
+}
 #endif
 
 void aceHostSdlInit(int isPal) {
@@ -258,11 +413,11 @@ void aceHostSdlInit(int isPal) {
 	{
 		const char *sz;
 		sz = getenv("ACE_HOST_NOPACE");
-		s_noPace = (sz && sz[0] && sz[0] != '0');
+		s_envNoPace = (sz && sz[0] && sz[0] != '0');
 		sz = getenv("ACE_HOST_HEADLESS");
 		if(sz && sz[0] && sz[0] != '0') {
 			s_headless = 1;
-			s_noPace = 1;
+			s_envNoPace = 1;
 		}
 		sz = getenv("ACE_HOST_QUIT_AFTER");
 		if(sz && sz[0]) {
@@ -302,9 +457,8 @@ void aceHostSdlInit(int isPal) {
 #ifdef ACE_HOST_HAS_SDL
 	{
 		SDL_AudioSpec want, have;
-		int h = isPal ? ACE_HOST_FB_HEIGHT_PAL : ACE_HOST_FB_HEIGHT_NTSC;
-		int winW = ACE_HOST_FB_WIDTH * s_scale;
-		int winH = winW * 3 / 4; /* 4:3 CRT, not square-pixel 640x256 */
+		tAceHostSettings *st;
+		int uw, uh;
 #if SDL_VERSION_ATLEAST(2, 0, 16)
 		SDL_SetMemoryFunctions(hostOsHeapMalloc, hostOsHeapCalloc, hostOsHeapRealloc, hostOsHeapFree);
 #endif
@@ -314,12 +468,8 @@ void aceHostSdlInit(int isPal) {
 #ifdef SDL_HINT_WINDOWS_DPI_SCALING
 		SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "0");
 #endif
-		/* Nearest-neighbor must be set before the renderer/texture exist. Linear
-		 * (or a non-integer stretch of 640x256 into a 4:3 window) turns lores
-		 * text and edges into a vertical comb / screen-door. */
 		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 #ifdef SDL_HINT_TIMER_RESOLUTION
-		/* 1 ms Sleep() so frame pacing can SDL_Delay the remainder instead of spinning. */
 		SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "1");
 #endif
 		if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS
@@ -330,29 +480,19 @@ void aceHostSdlInit(int isPal) {
 			fprintf(stderr, "[ACE_HOST] SDL_Init: %s\n", SDL_GetError());
 			return;
 		}
+		resolveIniPath();
+		aceHostSettingsLoad(s_iniPath);
+		st = aceHostSettings();
+		aspectUnit(&uw, &uh);
 		s_win = SDL_CreateWindow(
 			"ACE host",
 			SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-			winW, winH, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI
+			uw * st->scale, uh * st->scale,
+			SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI
 		);
-		s_ren = SDL_CreateRenderer(
-			s_win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
-		);
-		if(!s_ren) {
-			s_ren = SDL_CreateRenderer(s_win, -1, SDL_RENDERER_ACCELERATED);
-		}
-		if(!s_ren) {
-			s_ren = SDL_CreateRenderer(s_win, -1, 0);
-		}
-		s_tex = SDL_CreateTexture(
-			s_ren, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STREAMING,
-			ACE_HOST_FB_WIDTH, h
-		);
-#if SDL_VERSION_ATLEAST(2, 0, 12)
-		if(s_tex) {
-			SDL_SetTextureScaleMode(s_tex, SDL_ScaleModeNearest);
-		}
-#endif
+		recreateHostRenderer();
+		applyFullscreen();
+		paulaSetHostVolume(st->volume);
 		memset(&want, 0, sizeof(want));
 		want.freq = 44100;
 		want.format = AUDIO_S16SYS;
@@ -374,13 +514,17 @@ void aceHostSdlInit(int isPal) {
 		SDL_SetRelativeMouseMode(SDL_TRUE);
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 		openFirstPad();
-		fprintf(stderr, "[ACE_HOST] virtual joystick ON (numpad 8462, fire 5/RCtrl → JOY1DAT)\n");
+		fprintf(stderr, "[ACE_HOST] virtual joystick %s (numpad 8462, fire 5/RCtrl → JOY1DAT)\n",
+			st->virtualJoy ? "ON" : "off");
 #endif
 		s_paceFreq = SDL_GetPerformanceFrequency();
 		if(!s_paceFreq) {
 			s_paceFreq = 1000;
 		}
 		s_paceReady = 0;
+		fprintf(stderr, "[ACE_HOST] video scale=%d aspect=%d filter=%d fs=%d ini=%s\n",
+			st->scale, st->aspect, st->filter, st->fullscreen,
+			s_iniPath[0] ? s_iniPath : "(none)");
 	}
 #else
 	fprintf(stderr, "[ACE_HOST] built without SDL2 — no window/audio\n");
@@ -389,6 +533,9 @@ void aceHostSdlInit(int isPal) {
 
 void aceHostSdlShutdown(void) {
 #ifdef ACE_HOST_HAS_SDL
+	if(s_iniPath[0]) {
+		aceHostSettingsSave(s_iniPath);
+	}
 	if(s_audio) {
 		SDL_CloseAudioDevice(s_audio);
 	}
@@ -433,27 +580,46 @@ void aceHostSdlPump(void) {
 #endif
 		else if(e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
 			int down = e.type == SDL_KEYDOWN;
+			SDL_Scancode sc;
+			int shift, alt;
 			if(e.key.repeat) {
 				continue;
 			}
-			if(down && e.key.keysym.scancode == SDL_SCANCODE_F11) {
-#ifdef ACE_HOST_DEBUG
-				s_hudOn ^= 1;
-#endif
+			sc = e.key.keysym.scancode;
+			shift = (e.key.keysym.mod & (KMOD_LSHIFT | KMOD_RSHIFT)) != 0;
+			alt = (e.key.keysym.mod & (KMOD_LALT | KMOD_RALT)) != 0;
+			if(down && alt && sc == SDL_SCANCODE_RETURN) {
+				aceHostChromeCycleFullscreen();
 			}
-			else if(down && e.key.keysym.scancode == SDL_SCANCODE_F12) {
-#ifdef ACE_HOST_DEBUG
-				s_hudFull ^= 1;
-#endif
-			}
-			else if(down && e.key.keysym.scancode == SDL_SCANCODE_F10) {
+			else if(down && shift && sc == SDL_SCANCODE_F10) {
 				chipsetSetTimingLog(!chipsetTimingLogEnabled());
 				fprintf(stderr, "[ACE_HOST] timing log %s\n",
 					chipsetTimingLogEnabled() ? "on" : "off");
 			}
-			/* Amiga keys come from SDL_GetKeyboardState in aceHostSdlApplyInput. */
+			else if(down && shift && sc == SDL_SCANCODE_F11) {
+#ifdef ACE_HOST_DEBUG
+				s_hudOn ^= 1;
+#endif
+			}
+			else if(down && shift && sc == SDL_SCANCODE_F12) {
+#ifdef ACE_HOST_DEBUG
+				s_hudFull ^= 1;
+#endif
+			}
+			else if(down && !shift && sc == SDL_SCANCODE_F11) {
+				aceHostMenuToggle(ACE_HOST_MENU_VIDEO);
+				applyChrome(ACE_HOST_CHROME_APPLY_TEXTURE);
+			}
+			else if(down && !shift && sc == SDL_SCANCODE_F12) {
+				aceHostMenuToggle(ACE_HOST_MENU_HOST);
+				applyChrome(ACE_HOST_CHROME_APPLY_TEXTURE);
+			}
+			else if(down && aceHostMenuIsOpen()) {
+				aceHostMenuOnKey((int)sc);
+			}
 		}
 	}
+	applyChrome(aceHostChromeConsumeApply());
 	if(s_quit) {
 		systemKill("window closed");
 	}
@@ -473,6 +639,7 @@ void aceHostSdlApplyInput(void) {
 	s_fireMask = 0;
 	s_pot = 0xFFFF;
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
+	if(aceHostSettings()->virtualJoy && !aceHostMenuIsOpen())
 	{
 		int up = ks[SDL_SCANCODE_KP_8];
 		int down = ks[SDL_SCANCODE_KP_2];
@@ -560,46 +727,122 @@ static void aceHostPaceVblank(void) {
 void aceHostSdlPresent(const UWORD *pFb, int width, int height) {
 #ifdef ACE_HOST_HAS_SDL
 	SDL_Rect dst;
-	int rw, rh;
-	/* 4:3 CRT unit: 640x480. Integer multiples keep lores columns 1:1 or 2:1
-	 * instead of 1.6x/2.5x nearest-neighbor combing on DPI or resized windows. */
-	const int unitW = ACE_HOST_FB_WIDTH;
-	const int unitH = ACE_HOST_FB_WIDTH * 3 / 4;
-	int scale;
+	int rw, rh, scale, unitW, unitH;
+	tAceHostSettings *st;
+	int menu, n;
+	const UWORD *upload;
+	int upW, upH;
 	if(s_headless || !s_ren || !s_tex) {
 		return;
 	}
+	st = aceHostSettings();
+	menu = aceHostMenuIsOpen();
 	memcpy(s_presentTmp, pFb, (size_t)width * (size_t)height * sizeof(UWORD));
 #ifdef ACE_HOST_DEBUG
 	if(s_hudOn) {
 		aceHostHudDraw(s_presentTmp, width, height);
 	}
 #endif
-	SDL_UpdateTexture(s_tex, NULL, s_presentTmp, width * (int)sizeof(UWORD));
-	SDL_GetRendererOutputSize(s_ren, &rw, &rh);
-	scale = rw / unitW;
-	if(rh / unitH < scale) {
-		scale = rh / unitH;
+	if(menu) {
+		aceHostMenuDraw(s_presentTmp, width, height);
 	}
-	if(scale < 1) {
-		if(rw * 3 >= rh * 4) {
-			dst.h = rh;
-			dst.w = rh * 4 / 3;
-			dst.x = (rw - dst.w) / 2;
-			dst.y = 0;
+	n = filterInteger();
+	upload = s_presentTmp;
+	upW = width;
+	upH = height;
+	if(!menu && n > 1) {
+		if(st->filter == ACE_HOST_FILTER_SCALE2X) {
+			aceHostScale2x(s_presentTmp, width, height, s_scaleBuf);
+		}
+		else if(st->filter == ACE_HOST_FILTER_HQ2X) {
+			aceHostHq2x(s_presentTmp, width, height, s_scaleBuf);
+		}
+		else if(st->filter == ACE_HOST_FILTER_HQ3X) {
+			aceHostHq3x(s_presentTmp, width, height, s_scaleBuf);
 		}
 		else {
-			dst.w = rw;
-			dst.h = rw * 3 / 4;
-			dst.x = 0;
-			dst.y = (rh - dst.h) / 2;
+			int x, y;
+			int dw = width * 2;
+			for(y = 0; y < height; ++y) {
+				for(x = 0; x < width; ++x) {
+					UWORD p = s_presentTmp[y * width + x];
+					s_scaleBuf[(y * 2) * dw + x * 2] = p;
+					s_scaleBuf[(y * 2) * dw + x * 2 + 1] = p;
+					s_scaleBuf[(y * 2 + 1) * dw + x * 2] = p;
+					s_scaleBuf[(y * 2 + 1) * dw + x * 2 + 1] = p;
+				}
+			}
+		}
+		upload = s_scaleBuf;
+		upW = width * n;
+		upH = height * n;
+		if(st->scanlines && st->filter != ACE_HOST_FILTER_LINEAR) {
+			int x, y;
+			for(y = 1; y < upH; y += 2) {
+				for(x = 0; x < upW; ++x) {
+					s_scaleBuf[y * upW + x] = (UWORD)((s_scaleBuf[y * upW + x] >> 1) & 0x7BEF);
+				}
+			}
 		}
 	}
+	if(s_texW != upW || s_texH != upH) {
+		createHostTexture();
+	}
+	if(!s_tex) {
+		return;
+	}
+	SDL_UpdateTexture(s_tex, NULL, upload, upW * (int)sizeof(UWORD));
+	SDL_GetRendererOutputSize(s_ren, &rw, &rh);
+	if(!menu && st->aspect == ACE_HOST_ASPECT_STRETCH) {
+		dst.x = 0;
+		dst.y = 0;
+		dst.w = rw;
+		dst.h = rh;
+		scale = 0;
+	}
 	else {
-		dst.w = unitW * scale;
-		dst.h = unitH * scale;
-		dst.x = (rw - dst.w) / 2;
-		dst.y = (rh - dst.h) / 2;
+		aspectUnit(&unitW, &unitH);
+		if(!menu && st->filter == ACE_HOST_FILTER_LINEAR) {
+			if(rw * unitH >= rh * unitW) {
+				dst.h = rh;
+				dst.w = rh * unitW / unitH;
+				dst.x = (rw - dst.w) / 2;
+				dst.y = 0;
+			}
+			else {
+				dst.w = rw;
+				dst.h = rw * unitH / unitW;
+				dst.x = 0;
+				dst.y = (rh - dst.h) / 2;
+			}
+			scale = 0;
+		}
+		else {
+			scale = rw / unitW;
+			if(rh / unitH < scale) {
+				scale = rh / unitH;
+			}
+			if(scale < 1) {
+				if(rw * unitH >= rh * unitW) {
+					dst.h = rh;
+					dst.w = rh * unitW / unitH;
+					dst.x = (rw - dst.w) / 2;
+					dst.y = 0;
+				}
+				else {
+					dst.w = rw;
+					dst.h = rw * unitH / unitW;
+					dst.x = 0;
+					dst.y = (rh - dst.h) / 2;
+				}
+			}
+			else {
+				dst.w = unitW * scale;
+				dst.h = unitH * scale;
+				dst.x = (rw - dst.w) / 2;
+				dst.y = (rh - dst.h) / 2;
+			}
+		}
 	}
 	if(s_vbl == 0) {
 		int ww = 0, wh = 0;
@@ -662,7 +905,7 @@ void aceHostOnVblank(void) {
 	}
 	aceHostSdlPresent(fb, w, h);
 #ifdef ACE_HOST_HAS_SDL
-	if(!s_headless && !s_noPace && !chipsetThreadRunning()) {
+	if(!s_headless && !noPaceNow() && !chipsetThreadRunning()) {
 		aceHostPaceVblank();
 	}
 #endif
