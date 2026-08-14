@@ -53,12 +53,21 @@ void INTERRUPT onKeyInterrupt(
 	REGARG(volatile void *pData, "a1")
 ) {
 	tKeyManager *pKeyManager = (tKeyManager*)pData;
+#ifndef ACE_HOST
 	volatile tRayPos *pRayPos = (tRayPos*)&pCustom->vposr;
+#endif
 
 	// Get the key code and start handshake
 	UBYTE ubKeyCode = ~g_pCia[CIA_A]->sdr;
 	g_pCia[CIA_A]->cra |= CIACRA_SPMODE;
+	/* Host: overlay of vposr/vhposr is not (Y<<8)|X on LE. getRayPos()
+	 * builds the same ulValue the bitfields expect. Amiga keeps the overlay. */
+#ifdef ACE_HOST
+	UWORD uwStart = getRayPos().bfPosY;
+	(void)pCustom;
+#else
 	UWORD uwStart = pRayPos->bfPosY;
+#endif
 
 	// Get keypress flag and shift key code
 	UBYTE ubKeyReleased = ubKeyCode & KEY_INTERRUPT_RELEASED_BIT;
@@ -70,7 +79,11 @@ void INTERRUPT onKeyInterrupt(
 	// End handshake
 	UWORD uwDelta;
 	do {
+#ifdef ACE_HOST
+		UWORD uwEnd = getRayPos().bfPosY;
+#else
 		UWORD uwEnd = pRayPos->bfPosY;
+#endif
 		if(uwEnd >= uwStart) {
 			uwDelta = uwEnd - uwStart;
 		}

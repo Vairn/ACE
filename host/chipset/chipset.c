@@ -23,7 +23,6 @@ static int s_skipRender;
 static int s_frameReady;
 static int s_vblankThisTick;
 static int s_vblankSync;
-static int s_blitWait;
 static int s_eClockAcc;
 static int s_bplBusyRemain;
 static int s_copSlotRemain;
@@ -1101,11 +1100,13 @@ static int SDLCALL chipThreadFn(void *ud) {
 #endif
 
 void chipsetOnVposRead(void) {
-	/* With the chipset thread running, VPOSR is live. Cooperative builds
-	 * still step a scanline per read so spin-waits finish. */
+	/* With the chipset thread running, VPOSR is live — except CIA-A SPMODE
+	 * handshake, which needs Y to move even while the thread is asleep in
+	 * chipThreadPace(). Cooperative builds always step a scanline per read. */
 	UWORD uwY;
 	unsigned guard;
-	if(chipThreadIsRunning() && !chipIsChipThread()) {
+	int spmode = g_pHostCia[0] && (g_pHostCia[0]->cra & CIACRA_SPMODE);
+	if(chipThreadIsRunning() && !chipIsChipThread() && !spmode) {
 		return;
 	}
 	uwY = s_uwVpos;
@@ -1116,29 +1117,15 @@ void chipsetOnVposRead(void) {
 }
 
 void chipsetWaitBlit(void) {
-	unsigned guard = 0;
+	/* Pixel work is already done in blitterStart; s_busy only counts DMA
+	 * slots. Do not yield to the 50 Hz chipset thread — SDL_Delay(0) is a
+	 * ~15 ms scheduler slice on Windows, so a checkerboard of blitRect
+	 * calls (menuDrawBg) was taking 10–20 seconds. */
 	chipLock();
 	chipsetSyncCpuWrites();
-	s_blitWait++;
-	while(blitterBusy() && guard++ < 4000000u) {
-		if(chipThreadIsRunning() && !chipIsChipThread()) {
-			chipUnlock();
-#ifdef ACE_HOST_HAS_SDL
-			SDL_Delay(0);
-#endif
-			chipLock();
-			chipsetSyncCpuWrites();
-		}
-		else {
-			unsigned i;
-			s_inChipset++;
-			for(i = 0; i < 16; ++i) {
-				runOneSlot();
-			}
-			s_inChipset--;
-		}
+	if(blitterBusy()) {
+		blitterFinishNow();
 	}
-	s_blitWait--;
 	chipUnlock();
 }
 

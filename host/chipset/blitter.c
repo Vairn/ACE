@@ -327,6 +327,9 @@ int blitterBusy(void) {
 }
 
 void blitterFinishNow(void) {
-	s_busy = 0;
-	s_slotsLeft = 0;
+	if(s_busy) {
+		s_busy = 0;
+		s_slotsLeft = 0;
+		chipsetRaiseInt(INTF_BLIT);
+	}
 }
