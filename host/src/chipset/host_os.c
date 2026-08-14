@@ -12,6 +12,7 @@
 #define _WIN32_WINNT 0x0A00
 #endif
 #include <windows.h>
+#include <timeapi.h>
 #else
 #include <dirent.h>
 #include <sys/mman.h>
@@ -198,6 +199,19 @@ int hostOsMkdir(const char *path) {
 		return 1;
 	}
 	return errno == EEXIST;
+#endif
+}
+
+void hostOsTimerHiRes(int on) {
+#ifdef _WIN32
+	if(on) {
+		timeBeginPeriod(1);
+	}
+	else {
+		timeEndPeriod(1);
+	}
+#else
+	(void)on;
 #endif
 }
 

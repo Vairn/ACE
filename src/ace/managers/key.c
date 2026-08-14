@@ -18,6 +18,9 @@ static UBYTE s_bInitCount = 0;
 static inline void keyIntSetState(
 	tKeyManager *pManager, UBYTE ubKeyCode, UBYTE ubKeyState
 ) {
+	if(ubKeyCode >= KEY_COUNT) {
+		return;
+	}
 	pManager->pStates[ubKeyCode] = ubKeyState;
 	if(ubKeyState == KEY_ACTIVE) {
 		pManager->ubLastKey = ubKeyCode;
@@ -25,6 +28,9 @@ static inline void keyIntSetState(
 }
 
 static inline UBYTE keyIntCheck(const tKeyManager *pManager, UBYTE ubKeyCode) {
+	if(ubKeyCode >= KEY_COUNT) {
+		return 0;
+	}
 	return pManager->pStates[ubKeyCode] != KEY_NACTIVE;
 }
 

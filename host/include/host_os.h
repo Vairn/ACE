@@ -21,6 +21,7 @@ void *hostOsDirOpen(const char *path);
 void hostOsDirClose(void *dir);
 int hostOsDirNext(void *dir, char *name, unsigned nameMax, int *isDir, long *size);
 int hostOsMkdir(const char *path);
+void hostOsTimerHiRes(int on);
 
 #ifdef __cplusplus
 }

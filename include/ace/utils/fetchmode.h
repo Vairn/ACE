@@ -12,11 +12,12 @@
 
 static inline UBYTE fetchModeGetBitplaneFmode(const tVPort *pVPort) {
 #ifdef ACE_USE_AGA_FEATURES
-	return pVPort->ubFmode & 0x03;
-#else
+	if(pVPort->eFlags & VP_FLAG_AGA) {
+		return pVPort->ubFmode & 0x03;
+	}
+#endif
 	(void)pVPort;
 	return 0;
-#endif
 }
 
 static inline UWORD fetchModeGetDDfStep(const tVPort *pVPort) {

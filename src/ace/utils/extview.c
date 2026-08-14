@@ -55,7 +55,7 @@ tView *viewCreate(void *pTags, ...) {
 		pView->uwFlags |= VIEW_FLAG_GLOBAL_BPP;
 	}
 #ifdef ACE_USE_AGA_FEATURES
-	if(tagGet(pTags, vaTags, TAG_VIEW_USES_AGA, 1)) {
+	if(tagGet(pTags, vaTags, TAG_VIEW_USES_AGA, 0)) {
 		pView->uwFlags |= VIEW_FLAG_GLOBAL_AGA;
 	}
 	logWrite(
@@ -248,7 +248,12 @@ void viewLoad(tView *pView) {
 	s_isPAL = systemIsPal();
 	UWORD uwWaitPos = (s_isPAL == 1) ? 300 : 260;
 	// if we are setting a NULL viewport we need to know if pal/NTSC
+#ifdef ACE_HOST
+	/* Tight getRayPos() spins starve the chipset thread on Windows. */
+	chipsetRunUntilVpos(uwWaitPos, 0);
+#else
 	while(getRayPos().bfPosY < uwWaitPos) continue;
+#endif
 #if defined(AMIGA)
 	if(!pView) {
 		g_sCopManager.pCopList = g_sCopManager.pBlankList;
@@ -295,7 +300,12 @@ void viewLoad(tView *pView) {
 		/* ESPRM/OSPRM = 1 (OCS sprite colors 16–31); BPLAM XOR = 0 */
 		g_pCustom->bplcon4 = 0x1100;
 #ifdef ACE_USE_AGA_FEATURES
-		g_pCustom->fmode = pView->pFirstVPort->ubFmode;
+		if(pView->pFirstVPort->eFlags & VP_FLAG_AGA) {
+			g_pCustom->fmode = pView->pFirstVPort->ubFmode;
+		}
+		else {
+			g_pCustom->fmode = 0;
+		}
 #else
 		g_pCustom->fmode = 0; // AGA fix
 #endif
@@ -318,7 +328,11 @@ void viewLoad(tView *pView) {
 	systemSetDmaBit(DMAB_RASTER, pView != 0);
 
 	// if we are setting a NULL viewport we need to know if pal/NTSC
+#ifdef ACE_HOST
+	chipsetRunUntilVpos(uwWaitPos, 0);
+#else
 	while(getRayPos().bfPosY < uwWaitPos) continue;
+#endif
 
 #endif // AMIGA
 	logBlockEnd("viewLoad()");
@@ -345,10 +359,12 @@ tVPort *vPortCreate(void *pTagList, ...) {
 
 	// Calculate Y offset - beneath previous ViewPort
 	pVPort->uwOffsY = 0;
-	tVPort *pPrevVPort = pView->pFirstVPort;
-	while(pPrevVPort) {
-		pVPort->uwOffsY += pPrevVPort->uwHeight;
-		pPrevVPort = pPrevVPort->pNext;
+	tVPort *pPrevVPort = 0;
+	tVPort *pScan = pView->pFirstVPort;
+	while(pScan) {
+		pVPort->uwOffsY += pScan->uwHeight;
+		pPrevVPort = pScan;
+		pScan = pScan->pNext;
 	}
 	if(pVPort->uwOffsY && !(pView->uwFlags & VIEW_FLAG_GLOBAL_PALETTE)) {
 		pVPort->uwOffsY += 2; // TODO: not always required?
@@ -369,12 +385,15 @@ tVPort *vPortCreate(void *pTagList, ...) {
 #ifdef ACE_USE_AGA_FEATURES
 	if(
 		tagGet(pTagList, vaTags, TAG_VPORT_USES_AGA, 0) ||
-		((pView->uwFlags & VIEW_FLAG_GLOBAL_AGA) && pPrevVPort && pPrevVPort->eFlags & VP_FLAG_AGA)
+		((pView->uwFlags & VIEW_FLAG_GLOBAL_AGA) &&
+			(!pPrevVPort || (pPrevVPort->eFlags & VP_FLAG_AGA)))
 	) {
 		pVPort->eFlags |= VP_FLAG_AGA;
 	}
 	const UBYTE ubDefaultFmode = 0;
-	pVPort->ubFmode = tagGet(pTagList, vaTags, TAG_VPORT_FMODE, ubDefaultFmode);
+	pVPort->ubFmode = (pVPort->eFlags & VP_FLAG_AGA)
+		? tagGet(pTagList, vaTags, TAG_VPORT_FMODE, ubDefaultFmode)
+		: ubDefaultFmode;
 #endif
 
 	// Get dimensions
@@ -393,9 +412,14 @@ tVPort *vPortCreate(void *pTagList, ...) {
 	}
 
 	logWrite(
-		"Dimensions: %ux%u@%hu (%s)\n",
+		"Dimensions: %ux%u@%hu (%s%s)\n",
 		pVPort->uwWidth, pVPort->uwHeight, pVPort->ubBpp,
-		((pVPort->eFlags & VP_FLAG_HIRES) ? "HIRES" : "LORES")
+		((pVPort->eFlags & VP_FLAG_HIRES) ? "HIRES" : "LORES"),
+#ifdef ACE_USE_AGA_FEATURES
+		(pVPort->eFlags & VP_FLAG_AGA) ? " AGA" : ""
+#else
+		""
+#endif
 	);
 
 	// Update view - add to vPort list
@@ -549,12 +573,16 @@ void vPortWaitForPos(const tVPort *pVPort, UWORD uwPosY, UBYTE isExact) {
 	}
 #endif
 
+#ifdef ACE_HOST
+	chipsetRunUntilVpos(uwEndPos, isExact);
+#else
 	if(isExact) {
 		// If current beam pos is on or past end pos, wait for start of next frame
 		while (getRayPos().bfPosY >= uwEndPos) continue;
 	}
 	// If current beam pos is before end pos, wait for it
 	while (getRayPos().bfPosY < uwEndPos) continue;
+#endif
 #endif // AMIGA
 }
 

@@ -134,30 +134,23 @@ static UBYTE amiKey(SDL_Scancode sc) {
 	return KEY_UNMAPPED;
 }
 
-static void sendKey(UBYTE code, int down) {
-	UBYTE raw = code;
-	if(code == KEY_UNMAPPED) {
-		return;
-	}
-	if(!down) {
-		raw |= 0x80;
-	}
-	chipsetInjectKey(raw);
-}
-
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 static int isVirtualJoyKey(SDL_Scancode sc);
 #endif
 
-/* Edge-detect SDL's live matrix so ACE pStates follow currently held keys,
- * not only the last KEYDOWN (ubLastKey / a missed KEYUP). */
+/* Write ACE pStates from SDL's live matrix. CIA SDR inject + the 3-line
+ * SPMODE wait drops KEYUPs (and can decode the wrong raw key), so Return
+ * stays ACTIVE and Up looks like Enter. keyUse() still sees a fresh press
+ * only on NACTIVE -> ACTIVE. */
 static void syncKeysFromSdl(void) {
 	const Uint8 *ks = SDL_GetKeyboardState(NULL);
-	static UBYTE s_prevDown[KEY_COUNT];
 	UBYTE down[KEY_COUNT];
 	int sc;
 	UBYTE i;
 
+	if(!ks) {
+		return;
+	}
 	memset(down, 0, sizeof(down));
 	for(sc = 0; sc < SDL_NUM_SCANCODES; ++sc) {
 		UBYTE ami;
@@ -178,14 +171,15 @@ static void syncKeysFromSdl(void) {
 		}
 	}
 	for(i = 0; i < KEY_COUNT; ++i) {
-		if(down[i] && !s_prevDown[i]) {
-			sendKey(i, 1);
+		if(down[i]) {
+			if(g_sKeyManager.pStates[i] == KEY_NACTIVE) {
+				keySetState(i, KEY_ACTIVE);
+			}
 		}
-		else if(!down[i] && s_prevDown[i]) {
-			sendKey(i, 0);
+		else if(g_sKeyManager.pStates[i] != KEY_NACTIVE) {
+			keySetState(i, KEY_NACTIVE);
 		}
 	}
-	memcpy(s_prevDown, down, sizeof(s_prevDown));
 }
 
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
@@ -324,6 +318,10 @@ void aceHostSdlInit(int isPal) {
 		 * (or a non-integer stretch of 640x256 into a 4:3 window) turns lores
 		 * text and edges into a vertical comb / screen-door. */
 		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+#ifdef SDL_HINT_TIMER_RESOLUTION
+		/* 1 ms Sleep() so frame pacing can SDL_Delay the remainder instead of spinning. */
+		SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "1");
+#endif
 		if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 			| SDL_INIT_GAMECONTROLLER
@@ -546,8 +544,6 @@ static void aceHostPaceVblank(void) {
 		Uint64 remainMs = (s_nextPace - now) * 1000u / s_paceFreq;
 		if(remainMs > 1u) {
 			SDL_Delay((Uint32)(remainMs - 1u));
-		}
-		while(SDL_GetPerformanceCounter() < s_nextPace) {
 		}
 		now = SDL_GetPerformanceCounter();
 	}

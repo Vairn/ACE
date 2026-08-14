@@ -13,6 +13,7 @@
 #include <ace/managers/viewport/simplebuffer.h>
 #include <ace/generic/screen.h>
 #include <stdio.h>
+#include <string.h>
 #include "game.h"
 
 #define COLOR_PRESSED_NEVER 4
@@ -122,35 +123,59 @@ static void showParallelStatus(void) {
 	fontDrawStr(s_pFont, s_pTestInputBfr->pBack, 160, 256, szMsg, 3, FONT_BOTTOM|FONT_HCENTER, s_pTextBitMap);
 }
 
+static const char *keyShortName(UBYTE ubKey, char *szTmp) {
+	switch(ubKey) {
+		case KEY_UP: return "UP";
+		case KEY_DOWN: return "DN";
+		case KEY_LEFT: return "LT";
+		case KEY_RIGHT: return "RT";
+		case KEY_RETURN: return "RET";
+		case KEY_NUMENTER: return "ENT";
+		case KEY_ESCAPE: return "ESC";
+		case KEY_SPACE: return "SP";
+		case KEY_BACKSPACE: return "BS";
+		case KEY_TAB: return "TAB";
+		default: {
+			char ch = (char)g_pToAscii[ubKey];
+			if(ch >= 32 && ch < 127) {
+				szTmp[0] = ch;
+				szTmp[1] = '\0';
+				return szTmp;
+			}
+			szTmp[0] = "0123456789ABCDEF"[ubKey >> 4];
+			szTmp[1] = "0123456789ABCDEF"[ubKey & 0xF];
+			szTmp[2] = '\0';
+			return szTmp;
+		}
+	}
+}
+
 /* Live held keys via keyCheck(), not ubLastKey (that stays set after release). */
 static void showKeyboard(void) {
 	char szMsg[48];
-	char szKeys[28];
+	char szKeys[32];
+	char szTmp[4];
 	UBYTE ubKey;
 	UBYTE ubN = 0;
 
 	szKeys[0] = '\0';
 	for(ubKey = 0; ubKey < KEY_COUNT; ++ubKey) {
-		char ch;
+		const char *szName;
+		UBYTE ubLen;
 		if(!keyCheck(ubKey)) {
 			continue;
 		}
-		if(ubN && ubN < sizeof(szKeys) - 2) {
+		szName = keyShortName(ubKey, szTmp);
+		ubLen = (UBYTE)strlen(szName);
+		if(ubN && ubN + 1 + ubLen < sizeof(szKeys)) {
 			szKeys[ubN++] = ' ';
 		}
-		ch = (char)g_pToAscii[ubKey];
-		if(ch >= 32 && ch < 127 && ubN < sizeof(szKeys) - 1) {
-			szKeys[ubN++] = ch;
-		}
-		else if(ubN + 2 < sizeof(szKeys) - 1) {
-			static const char szHex[] = "0123456789ABCDEF";
-			szKeys[ubN++] = szHex[ubKey >> 4];
-			szKeys[ubN++] = szHex[ubKey & 0xF];
-		}
-		szKeys[ubN] = '\0';
-		if(ubN >= sizeof(szKeys) - 4) {
+		if(ubN + ubLen >= sizeof(szKeys)) {
 			break;
 		}
+		memcpy(szKeys + ubN, szName, ubLen);
+		ubN = (UBYTE)(ubN + ubLen);
+		szKeys[ubN] = '\0';
 	}
 	if(!ubN) {
 		sprintf(szMsg, "Keyboard: -");
