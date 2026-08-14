@@ -428,6 +428,7 @@ static inline void tileBufferContinueTileDraw(
 			g_pCustom->bltdpt = pUbBltdpt;
 		}
 		g_pCustom->bltsize = uwBltsize;
+		blitStrobeSync();
 	}
 	else {
 		ULONG ulSrcOffs = (ULONG)pManager->pTileSetOffsets[TileToDraw] - (ULONG)pManager->pTileSet->Planes[0];
@@ -443,6 +444,7 @@ static inline void tileBufferContinueTileDraw(
 			g_pCustom->bltapt = pUbBltapt;
 			g_pCustom->bltdpt = pUbBltdpt;
 			g_pCustom->bltsize = uwBltsize & ~BLIT_WORDS_NON_INTERLEAVED_BIT;
+			blitStrobeSync();
 		}
 	}
 }
@@ -704,8 +706,13 @@ static inline void tileBufferRedrawAllInternal(tTileBufferManager *pManager, UBY
 	UWORD uwBfrOffsY = SCROLLBUFFER_HEIGHT_MODULO(uwStartY << ubTileShift, uwMarginedHeight);
 
 	// Now we can calculate at which tile index we will jump from the bottom of the
-	// viewport to the top
+	// viewport to the top. Clamp to uwEndY: the margined height is rounded up
+	// (e.g. to a power of two) and can cover more tile rows than the tile bounds
+	// have, and the loop below is bounded by this value, not by uwEndY. Without
+	// the clamp a map that is exactly as tall as the margined buffer reads past
+	// the end of a pTileData column — silent garbage on Amiga, a host segfault.
 	UWORD uwWrapAroundY = (((uwStartY << ubTileShift) + uwMarginedHeight) - uwBfrOffsY) >> ubTileShift;
+	uwWrapAroundY = MIN(uwWrapAroundY, uwEndY);
 
 	// Now we can calculate the Y contribution to the total offset into the buffer bitmap
 	ULONG ulDstYOffset = uwDstBytesPerRow * uwBfrOffsY;

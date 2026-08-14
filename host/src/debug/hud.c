@@ -238,6 +238,7 @@ void aceHostHudDraw(UWORD *pFb, int width, int height) {
 				case ACE_HOST_DMA_BPL: col = 0x07E0; break;
 				case ACE_HOST_DMA_COPPER: col = 0xF81F; break;
 				case ACE_HOST_DMA_BLIT: col = 0xF800; break;
+				case ACE_HOST_DMA_CPU: col = 0x001F; break;
 				default: break;
 			}
 			plotHud(pFb, width, height, 2 + i, y, col);

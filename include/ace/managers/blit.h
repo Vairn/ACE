@@ -33,6 +33,9 @@ extern "C" {
 #include <ace/managers/memory.h>
 #include <ace/utils/custom.h>
 #include <ace/utils/bitmap.h>
+#ifdef ACE_HOST
+#include <ace_host/chipset.h>
+#endif
 
 // BltCon0 channel enable bits
 #define USEA 0x800
@@ -94,6 +97,26 @@ UBYTE blitIsIdle(void);
  * @see blitIsIdle()
  */
 void blitWait(void);
+
+/**
+ * @brief Hands a just-strobed BLTSIZE to the chipset. Does nothing on Amiga.
+ *
+ * Agnus latches BLTSIZE the instant it is written, so on Amiga a blit started
+ * without a preceding blitWait() (the BLITHOG tile draw does exactly that) is
+ * already running by the time the CPU sets up the next one. The host chipset
+ * has no way to trap the write and instead polls the register file, usually
+ * from blitWait(), so a blit queued without waiting must be announced - or the
+ * next BLTAPT/BLTDPT write silently replaces it before it ever runs.
+ *
+ * Call this right after writing BLTSIZE if you are not going to blitWait().
+ *
+ * @see blitWait()
+ */
+#ifdef ACE_HOST
+#define blitStrobeSync() chipsetSyncCpuWrites()
+#else
+#define blitStrobeSync() do {} while(0)
+#endif
 
 /**
  * @brief Performs the rectangular copy between two bitmap regions,

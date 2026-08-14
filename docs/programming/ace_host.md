@@ -172,9 +172,19 @@ Priority on each slot (first match wins):
 3. **Sprites** — `h` in `$15..$24` from line 25 (HRM first sprite DMA line)
 4. **Bitplane** — inside DDF, aligned to fetch period (lores 8 CCK, hires 4; AGA FMODE widens this)
 5. **Copper remainder** — second CCK of a 2-slot instruction
-6. **Blit-hog** — if `DMAF_BLITHOG` and the blitter is busy
-7. **Copper** — MOVE / WAIT / SKIP / terminate (`$FFFF,$FFFE`)
-8. **Blitter** — leftover slots while BBUSY
+6. **Copper** — MOVE / WAIT / SKIP / terminate (`$FFFF,$FFFE`)
+7. **Blitter** — leftover slots while BBUSY, subject to `DMAF_BLITHOG`
+8. **CPU** — a slot the blitter yielded (nothing else can claim it)
+
+`DMAF_BLITHOG` (a.k.a. `DMAF_BLITPRI`/BLTPRI) arbitrates the blitter against the
+CPU only; the copper outranks the blitter whether the bit is set or not. Set, the
+blitter takes every slot the higher-priority channels left. Clear, Agnus lets the
+CPU in for one cycle once it has been denied the bus three cycles running, so the
+blitter drops one slot in four during a long blit. Game code never runs on an
+emulated 68000 here, so that yielded slot is simply left free — but it still
+stretches BBUSY, which is what `blitWait()` and copper blitter-WAITs observe.
+Managers that set the bit deliberately (`tileBufferRedrawAll`) therefore finish
+their blits in fewer scanlines than with it clear, as on real hardware.
 
 Denise paints 2 lores (pixel-doubled to 640) or 4 hires pixels per slot into a
 640-wide RGB565 framebuffer (256 PAL / 200 NTSC visible rows after DIWSTRT).
@@ -183,6 +193,14 @@ CPU writes to strobe registers (`BLTSIZE`, `BLTSIZH`, `COPJMP1/2`, `DMACON`,
 `INTENA`, `INTREQ`) are **latched**. `chipsetSyncCpuWrites()` applies them
 before the next slot batch. ACE managers that write COLOR under AGA also call
 it explicitly so LOCT high/low nibbles are not lost.
+
+The register file is plain memory, so the host cannot trap a write — it polls.
+Normal blit code is safe because it opens with `blitWait()`, which flushes the
+previous strobe. Code that starts a blit and then sets up the next one *without*
+waiting (the `TILEBUFFER_REDRAW_HOG` tile draw) must call `blitStrobeSync()`
+right after writing `BLTSIZE`, or the following BLTAPT/BLTDPT write replaces a
+blit that never ran — the tiles vanish and destination-pointer chaining drifts.
+The macro is a no-op on Amiga, where Agnus latches BLTSIZE immediately.
 
 A background **chipset thread** (SDL) advances one scanline per loop and sleeps
 to 50/60 Hz. The game thread must not present from that thread — SDL is only
@@ -210,6 +228,11 @@ copper WAITs see realistic BBUSY.
 on the game thread instead of yielding to the 50 Hz chipset thread (a
 `SDL_Delay(0)` on Windows can be ~15 ms and would turn a checkerboard of
 `blitRect` into tens of seconds).
+
+Starting a blit while the previous one still owes slots (the hog path does this
+every tile, since the native CPU never gets throttled) **adds** to the pending
+count rather than replacing it, so BBUSY and the HUD `BLIT` counter still add up
+to what the bus would really have cost.
 
 Mixed interleaved/non-interleaved copies that would be painful on real hardware
 are done with a host `memcpy` helper for cookie/copy minterms when 16-pixel
@@ -509,6 +532,7 @@ F12 paints the last scanline’s 227 DMA slots:
 | Green | Bitplane |
 | Magenta | Copper |
 | Red | Blitter |
+| Blue | CPU (slot the blitter yielded with BLITHOG clear) |
 
 Over-budget (VIRTUAL) flashes `OVER BUDGET` in red.
 

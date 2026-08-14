@@ -27,6 +27,7 @@ static int s_vblankSync;
 static int s_eClockAcc;
 static int s_bplBusyRemain;
 static int s_copSlotRemain;
+static int s_cpuDeniedRun;
 static int s_timingLog;
 static int s_timingOk = 1;
 static volatile unsigned s_frameCount;
@@ -57,6 +58,10 @@ static UWORD s_sprDatA[8][4], s_sprDatB[8][4];
 static int s_sprX[8], s_sprY0[8], s_sprY1[8], s_sprAttach[8];
 /* First sprite DMA line (HRM). Copper writes SPRxPT during vblank first. */
 #define SPRITE_DMA_FIRST_LINE 25
+
+/* With BLTPRI clear, Agnus lets the CPU in for one cycle once it has been
+ * denied the bus this many cycles in a row. */
+#define CPU_STARVE_SLOTS 3
 
 static UWORD s_lastBltsize, s_lastCopjmp1, s_lastCopjmp2;
 static UWORD s_lastDmaconW, s_lastIntenaW, s_lastIntreqW;
@@ -1072,25 +1077,33 @@ static void runOneSlot(void) {
 	}
 
 	if(!used) {
-		int blitHog = (s_uwDmacon & DMAF_BLITHOG) && blitterBusy() &&
-			(s_uwDmacon & DMAF_BLITTER) && (s_uwDmacon & DMAF_MASTER);
-		if(blitHog) {
-			blitterUseSlot();
-			s_blitSlotsFrame++;
-			kind = ACE_HOST_DMA_BLIT;
-			used = 1;
-		}
-		else if(copperTick()) {
+		if(copperTick()) {
 			kind = ACE_HOST_DMA_COPPER;
 			used = 1;
 			s_copSlotRemain = 1;
 		}
 		else if(blitterBusy() && (s_uwDmacon & DMAF_BLITTER) && (s_uwDmacon & DMAF_MASTER)) {
-			blitterUseSlot();
-			s_blitSlotsFrame++;
-			kind = ACE_HOST_DMA_BLIT;
-			used = 1;
+			/* BLTPRI arbitrates the blitter against the CPU only — the copper
+			 * outranks it either way. There is no emulated CPU bus client, so
+			 * a yielded slot is just left free; it still stretches BBUSY the
+			 * way it would on metal. */
+			if((s_uwDmacon & DMAF_BLITHOG) || s_cpuDeniedRun < CPU_STARVE_SLOTS) {
+				blitterUseSlot();
+				s_blitSlotsFrame++;
+				kind = ACE_HOST_DMA_BLIT;
+				used = 1;
+			}
+			else {
+				kind = ACE_HOST_DMA_CPU;
+			}
 		}
+	}
+
+	if(used) {
+		s_cpuDeniedRun++;
+	}
+	else {
+		s_cpuDeniedRun = 0;
 	}
 
 	s_lineDma[h] = (UBYTE)kind;
@@ -1505,6 +1518,7 @@ void chipsetReset(void) {
 	s_uwIntreq = 0;
 	s_copHalted = 1;
 	s_ulCopPc = 0;
+	s_cpuDeniedRun = 0;
 	s_slotsThisLine = 0;
 	s_linesThisFrame = 0;
 	s_linesLastFrame = 0;

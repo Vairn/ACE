@@ -300,6 +300,11 @@ void blitterStart(UWORD uwBltSize) {
 }
 
 void blitterStartWH(int height, int width) {
+	/* Queued blits (BLITHOG tile draw strobes BLTSIZE without waiting) arrive
+	 * while the previous one still owes DMA slots. The pixel work is already
+	 * done, but its bus cost is not — keep it so BBUSY covers both. */
+	int pendingSlots = s_busy ? s_slotsLeft : 0;
+
 	s_busy = 1;
 	if(g_pHostCustom->bltcon1 & 1) {
 		blitLine(width, height);
@@ -310,6 +315,7 @@ void blitterStartWH(int height, int width) {
 	if(s_slotsLeft < 1) {
 		s_slotsLeft = 1;
 	}
+	s_slotsLeft += pendingSlots;
 }
 
 void blitterUseSlot(void) {

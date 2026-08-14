@@ -47,7 +47,8 @@ typedef enum tAceHostDmaKind {
 	ACE_HOST_DMA_SPRITE,
 	ACE_HOST_DMA_BPL,
 	ACE_HOST_DMA_COPPER,
-	ACE_HOST_DMA_BLIT
+	ACE_HOST_DMA_BLIT,
+	ACE_HOST_DMA_CPU
 } tAceHostDmaKind;
 
 typedef struct tAceHostAllocInfo {
