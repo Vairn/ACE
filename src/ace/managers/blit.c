@@ -150,9 +150,11 @@ void blitWait(void) {
 #ifdef ACE_HOST
 	chipsetWaitBlit();
 #else
-	// A1000 Blitter done bug:
-	// The solution is to read hardware register before testing the bit.
+#if !defined(ACE_USE_ECS_FEATURES)
+	// A1000 Blitter done bug: first dmaconr read after blit start can lie.
+	// Fixed on ECS/AGA Agnus - skip the dummy read there.
 	(void)g_pCustom->dmaconr;
+#endif
 	while(g_pCustom->dmaconr & DMAF_BLTDONE) continue;
 #endif
 }
@@ -161,9 +163,11 @@ UBYTE blitIsIdle(void) {
 #ifdef ACE_HOST
 	return (UBYTE)!chipsetBlitIsBusy();
 #else
-	// A1000 Blitter done bug:
-	// The solution is to read hardware register before testing the bit.
+#if !defined(ACE_USE_ECS_FEATURES)
+	// A1000 Blitter done bug: first dmaconr read after blit start can lie.
+	// Fixed on ECS/AGA Agnus - skip the dummy read there.
 	(void)g_pCustom->dmaconr;
+#endif
 	if(g_pCustom->dmaconr & DMAF_BLTDONE) {
 		return 0;
 	}
@@ -286,15 +290,16 @@ UBYTE blitUnsafeCopy(
 		g_pCustom->bltcmod = wDstModulo;
 		g_pCustom->bltdmod = wDstModulo;
 		g_pCustom->bltadat = 0xFFFF;
+#if defined(ACE_USE_ECS_FEATURES)
+		g_pCustom->bltsizv = wHeight;
+#endif
 		while(ubPlane--) {
 			blitWait();
 			// This hell of a casting must stay here or else large offsets get bugged!
 			g_pCustom->bltbpt = &pSrc->Planes[ubPlane][ulSrcOffs];
 			g_pCustom->bltcpt = &pDst->Planes[ubPlane][ulDstOffs];
 			g_pCustom->bltdpt = &pDst->Planes[ubPlane][ulDstOffs];
-
 #if defined(ACE_USE_ECS_FEATURES)
-			g_pCustom->bltsizv = wHeight;
 			g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 			g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
@@ -372,12 +377,14 @@ UBYTE blitUnsafeCopyAligned(
 		g_pCustom->bltcon1 = 0;
 		g_pCustom->bltcmod = wSrcModulo;
 		g_pCustom->bltdmod = wDstModulo;
+#if defined(ACE_USE_ECS_FEATURES)
+		g_pCustom->bltsizv = wHeight;
+#endif
 		while(ubPlane--) {
 			blitWait();
 			g_pCustom->bltcpt = &pSrc->Planes[ubPlane][ulSrcOffs];
 			g_pCustom->bltdpt = &pDst->Planes[ubPlane][ulDstOffs];
 #if defined(ACE_USE_ECS_FEATURES)
-			g_pCustom->bltsizv = wHeight;
 			g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 			g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
@@ -527,12 +534,13 @@ UBYTE blitUnsafeCopyMask(
 		g_pCustom->bltcon1 = uwBltCon1;
 		g_pCustom->bltafwm = uwFirstMask;
 		g_pCustom->bltalwm = uwLastMask;
-		g_pCustom->bltapt = (APTR)&pMsk[ulSrcOffs];
 		g_pCustom->bltamod = wSrcModulo;
 		g_pCustom->bltbmod = wSrcModulo;
 		g_pCustom->bltcmod = wDstModulo;
 		g_pCustom->bltdmod = wDstModulo;
-
+#if defined(ACE_USE_ECS_FEATURES)
+		g_pCustom->bltsizv = wHeight;
+#endif
 		while(ubPlane--) {
 			blitWait();
 			// This hell of a casting must stay here or else large offsets get bugged!
@@ -540,9 +548,7 @@ UBYTE blitUnsafeCopyMask(
 			g_pCustom->bltbpt = &pSrc->Planes[ubPlane][ulSrcOffs];
 			g_pCustom->bltcpt = &pDst->Planes[ubPlane][ulDstOffs];
 			g_pCustom->bltdpt = &pDst->Planes[ubPlane][ulDstOffs];
-
 #if defined(ACE_USE_ECS_FEATURES)
-			g_pCustom->bltsizv = wHeight;
 			g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 			g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
@@ -596,6 +602,9 @@ UBYTE blitUnsafeRect(
 	g_pCustom->bltdmod = wDstModulo;
 	g_pCustom->bltadat = 0xFFFF;
 	g_pCustom->bltbdat = 0;
+#if defined(ACE_USE_ECS_FEATURES)
+	g_pCustom->bltsizv = wHeight;
+#endif
 	ubPlane = 0;
 
 	do {
@@ -607,7 +616,6 @@ UBYTE blitUnsafeRect(
 		g_pCustom->bltcpt = pDst->Planes[ubPlane] + ulDstOffs;
 		g_pCustom->bltdpt = pDst->Planes[ubPlane] + ulDstOffs;
 #if defined(ACE_USE_ECS_FEATURES)
-		g_pCustom->bltsizv = wHeight;
 		g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 		g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
