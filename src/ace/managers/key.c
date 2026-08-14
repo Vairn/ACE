@@ -58,13 +58,7 @@ void INTERRUPT onKeyInterrupt(
 	// Get the key code and start handshake
 	UBYTE ubKeyCode = ~g_pCia[CIA_A]->sdr;
 	g_pCia[CIA_A]->cra |= CIACRA_SPMODE;
-#ifdef ACE_HOST
-	/* Host vposr is not live MMIO; getRayPos() advances the beam. */
-	UWORD uwStart = getRayPos().bfPosY;
-	(void)pRayPos;
-#else
 	UWORD uwStart = pRayPos->bfPosY;
-#endif
 
 	// Get keypress flag and shift key code
 	UBYTE ubKeyReleased = ubKeyCode & KEY_INTERRUPT_RELEASED_BIT;
@@ -76,11 +70,7 @@ void INTERRUPT onKeyInterrupt(
 	// End handshake
 	UWORD uwDelta;
 	do {
-#ifdef ACE_HOST
-		UWORD uwEnd = getRayPos().bfPosY;
-#else
 		UWORD uwEnd = pRayPos->bfPosY;
-#endif
 		if(uwEnd >= uwStart) {
 			uwDelta = uwEnd - uwStart;
 		}

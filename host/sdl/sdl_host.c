@@ -625,7 +625,7 @@ void aceHostOnVblank(void) {
 	}
 	aceHostSdlPresent(fb, w, h);
 #ifdef ACE_HOST_HAS_SDL
-	if(!s_headless && !s_noPace) {
+	if(!s_headless && !s_noPace && !chipsetThreadRunning()) {
 		aceHostPaceVblank();
 	}
 #endif

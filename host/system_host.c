@@ -3,6 +3,7 @@
 #include <ace/managers/system.h>
 #include <ace/managers/log.h>
 #include <ace/managers/timer.h>
+#include <ace_host/mixer.h>
 #include <clib/exec_protos.h>
 #include <clib/dos_protos.h>
 #include <clib/graphics_protos.h>
@@ -246,6 +247,7 @@ void systemCreate(void) {
 	chipsetInit(s_isPal);
 	aceHostDosInitGfxBase();
 	aceHostSdlInit(s_isPal);
+	chipsetStartThread();
 	setvbuf(stdout, 0, _IONBF, 0);
 	setvbuf(stderr, 0, _IONBF, 0);
 	s_wSystemUses = 1;
@@ -377,6 +379,9 @@ void aceHostDispatchInts(UWORD uwPending) {
 	 * INTF_INTEN around some SFX setup, so AUD must not wait on it. */
 	for(i = INTB_AUD0; i <= INTB_AUD3; ++i) {
 		UWORD bit = (UWORD)(1u << i);
+		if(i == INTB_AUD3 && aceHostMixerOwnsAud3()) {
+			continue;
+		}
 		if((uwPending & bit) && s_pAceInterrupts[i].pHandler) {
 			s_pAceInterrupts[i].pHandler(g_pCustom, s_pAceInterrupts[i].pData);
 			handled |= bit;

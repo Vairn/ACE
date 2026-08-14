@@ -24,6 +24,7 @@ typedef struct tChan {
 	int hasNext;
 	int needFetch;
 	int on;
+	int idle;
 } tChan;
 
 static tChan s_ch[4];
@@ -93,12 +94,14 @@ void paulaOnDmaEnable(UWORD uwOld, UWORD uwNew) {
 			s_ch[i].hasNext = 0;
 			s_ch[i].needFetch = 1;
 			s_ch[i].on = 1;
+			s_ch[i].idle = 0;
 		}
 		if(!(uwNew & bit)) {
 			s_ch[i].on = 0;
 			s_ch[i].hasCurrent = 0;
 			s_ch[i].hasNext = 0;
 			s_ch[i].needFetch = 0;
+			s_ch[i].idle = 0;
 		}
 	}
 }
@@ -119,11 +122,17 @@ void paulaDmaSlot(int ch) {
 		return;
 	}
 	if(p->remain == 0) {
+		UWORD uwLen = g_pHostCustom->aud[ch].ac_len;
 		p->start = ptrOf(g_pHostCustom->aud[ch].ac_ptr);
-		p->len = lenWords(g_pHostCustom->aud[ch].ac_len);
+		p->len = lenWords(uwLen);
 		p->ptr = p->start;
 		p->remain = p->len;
-		/* Sample DMA finished — ptplayer one-shots disable the channel here. */
+		/* Sample DMA finished. A 1-word loop is Paula idle (two zeros);
+		 * keep AUDx pending so ptplayer's poll path sees the channel done. */
+		chipsetRaiseInt((UWORD)(INTF_AUD0 << ch));
+		p->idle = (uwLen == 1);
+	}
+	else if(p->idle) {
 		chipsetRaiseInt((UWORD)(INTF_AUD0 << ch));
 	}
 	if(!p->remain) {

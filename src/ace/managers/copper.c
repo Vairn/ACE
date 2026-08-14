@@ -11,6 +11,7 @@
 
 tCopManager g_sCopManager;
 
+#ifdef ACE_HOST
 /* Y then X. ulYX is (Y<<16)|X only on big-endian; LE must not sort by that. */
 static int copWaitPosLess(tUwCoordYX sA, tUwCoordYX sB) {
 	if(sA.uwY != sB.uwY) {
@@ -18,6 +19,10 @@ static int copWaitPosLess(tUwCoordYX sA, tUwCoordYX sB) {
 	}
 	return sA.uwX < sB.uwX;
 }
+#define COP_WAIT_LESS(a, b) copWaitPosLess((a), (b))
+#else
+#define COP_WAIT_LESS(a, b) ((a).ulYX < (b).ulYX)
+#endif
 
 void copCreate(void) {
 	logBlockBegin("copCreate()");
@@ -288,7 +293,7 @@ tCopBlock *copBlockCreate(tCopList *pCopList, UWORD uwMaxCmds, UWORD uwWaitX, UW
 
 	// Add to list
 	logWrite("Head: %p\n", pCopList->pFirstBlock);
-	if(!pCopList->pFirstBlock || copWaitPosLess(pBlock->uWaitPos, pCopList->pFirstBlock->uWaitPos)) {
+	if(!pCopList->pFirstBlock || COP_WAIT_LESS(pBlock->uWaitPos, pCopList->pFirstBlock->uWaitPos)) {
 		pBlock->pNext = pCopList->pFirstBlock;
 		pCopList->pFirstBlock = pBlock;
 		logWrite("Added as head, next: %p\n", pBlock->pNext);
@@ -297,7 +302,7 @@ tCopBlock *copBlockCreate(tCopList *pCopList, UWORD uwMaxCmds, UWORD uwWaitX, UW
 		tCopBlock *pPrev;
 
 		pPrev = pCopList->pFirstBlock;
-		while(pPrev->pNext && copWaitPosLess(pPrev->pNext->uWaitPos, pBlock->uWaitPos)) {
+		while(pPrev->pNext && COP_WAIT_LESS(pPrev->pNext->uWaitPos, pBlock->uWaitPos)) {
 			pPrev = pPrev->pNext;
 		}
 		pBlock->pNext = pPrev->pNext;
@@ -405,7 +410,7 @@ void copReorderBlocks(void) {
 		tCopBlock *pBlock = pCopList->pFirstBlock;
 		tCopBlock *pPrev = 0;
 		while(pBlock->pNext) {
-			if(copWaitPosLess(pBlock->pNext->uWaitPos, pBlock->uWaitPos)) {
+			if(COP_WAIT_LESS(pBlock->pNext->uWaitPos, pBlock->uWaitPos)) {
 				if(!pPrev) {
 					pCopList->pFirstBlock = pBlock->pNext;
 					pBlock->pNext = pCopList->pFirstBlock->pNext;

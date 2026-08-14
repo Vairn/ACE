@@ -88,6 +88,8 @@ int aceHostAllocAt(unsigned idx, tAceHostAllocInfo *pOut);
 
 void aceHostBindCustom(void);
 void chipsetInit(int isPal);
+void chipsetStartThread(void);
+int chipsetThreadRunning(void);
 void chipsetShutdown(void);
 void chipsetReset(void);
 void chipsetSyncCpuWrites(void);

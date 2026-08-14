@@ -13,6 +13,7 @@
 #define ECS_BLTSIZH_STROBE(width) (width)
 #endif
 
+#ifdef ACE_HOST
 /**
  * Byte-aligned copy between bitmaps whose interleavedness differs.
  * Uses each bitmap's BytesPerRow as the stride between successive lines of
@@ -48,6 +49,7 @@ static UBYTE blitCopyMixedLayout(
 	}
 	return 1;
 }
+#endif
 
 void blitManagerCreate(void) {
 	logBlockBegin("blitManagerCreate");
@@ -189,6 +191,7 @@ UBYTE blitUnsafeCopy(
 		bitmapIsInterleaved(pSrc) && bitmapIsInterleaved(pDst) &&
 		pSrc->Depth == pDst->Depth
 	);
+#ifdef ACE_HOST
 	if(
 		!isBlitInterleaved &&
 		(bitmapIsInterleaved(pSrc) || bitmapIsInterleaved(pDst)) &&
@@ -197,6 +200,7 @@ UBYTE blitUnsafeCopy(
 	) {
 		return 1;
 	}
+#endif
 
 	if(ubSrcDelta > ubDstDelta || ((wWidth+ubDstDelta+15) & 0xFFF0)-(wWidth+ubSrcDelta) > 16) {
 		uwBlitWidth = (wWidth+(ubSrcDelta>ubDstDelta?ubSrcDelta:ubDstDelta)+15) & 0xFFF0;
@@ -267,9 +271,6 @@ UBYTE blitUnsafeCopy(
 #else
 		g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
-#ifdef ACE_HOST
-		blitWait();
-#endif
 	}
 	else {
 		wSrcModulo = pSrc->BytesPerRow - uwBlitWords * 2;
@@ -299,9 +300,6 @@ UBYTE blitUnsafeCopy(
 			g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
 		}
-#ifdef ACE_HOST
-		blitWait();
-#endif
 	}
 
 	return 1;
@@ -352,17 +350,16 @@ UBYTE blitUnsafeCopyAligned(
 #else
 		g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
-#ifdef ACE_HOST
-		blitWait();
-#endif
 	}
 	else {
 		if(bitmapIsInterleaved(pSrc) || bitmapIsInterleaved(pDst)) {
+#ifdef ACE_HOST
 			if(blitCopyMixedLayout(
 				pSrc, wSrcX, wSrcY, pDst, wDstX, wDstY, wWidth, wHeight
 			)) {
 				return 1;
 			}
+#endif
 			logWrite("WARN: Mixed interleaved - you're losing lots of performance here\n");
 		}
 
@@ -386,9 +383,6 @@ UBYTE blitUnsafeCopyAligned(
 			g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
 		}
-#ifdef ACE_HOST
-		blitWait();
-#endif
 	}
 
 	return 1;
@@ -522,9 +516,6 @@ UBYTE blitUnsafeCopyMask(
 #else
 		g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
-#ifdef ACE_HOST
-		blitWait();
-#endif
 	}
 	else {
 		wSrcModulo = pSrc->BytesPerRow - uwBlitWords * 2;
@@ -557,9 +548,6 @@ UBYTE blitUnsafeCopyMask(
 			g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
 		}
-#ifdef ACE_HOST
-		blitWait();
-#endif
 	}
 
 	return 1;

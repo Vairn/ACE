@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#ifdef ACE_HOST_HAS_SDL
+#include <SDL.h>
+#endif
 
 struct Custom *g_pHostCustom;
 tCia *g_pHostCia[2];
@@ -62,6 +65,62 @@ static int s_bplWordsThisLine;
 static int s_slotsThisLine;
 static int s_linesThisFrame;
 static int s_linesLastFrame;
+
+#ifdef ACE_HOST_HAS_SDL
+static SDL_mutex *s_chipMx;
+static SDL_Thread *s_chipTh;
+static SDL_threadID s_chipThreadId;
+static SDL_threadID s_lockOwner;
+static int s_lockDepth;
+static volatile int s_chipRun;
+static Uint64 s_threadPaceNext;
+static Uint64 s_threadPaceFreq;
+#endif
+
+static void chipLock(void) {
+#ifdef ACE_HOST_HAS_SDL
+	SDL_threadID me;
+	if(!s_chipMx) {
+		return;
+	}
+	me = SDL_ThreadID();
+	if(s_lockDepth && s_lockOwner == me) {
+		s_lockDepth++;
+		return;
+	}
+	SDL_LockMutex(s_chipMx);
+	s_lockOwner = me;
+	s_lockDepth = 1;
+#endif
+}
+
+static void chipUnlock(void) {
+#ifdef ACE_HOST_HAS_SDL
+	if(!s_chipMx) {
+		return;
+	}
+	if(--s_lockDepth == 0) {
+		s_lockOwner = 0;
+		SDL_UnlockMutex(s_chipMx);
+	}
+#endif
+}
+
+static int chipThreadIsRunning(void) {
+#ifdef ACE_HOST_HAS_SDL
+	return s_chipRun && s_chipTh;
+#else
+	return 0;
+#endif
+}
+
+static int chipIsChipThread(void) {
+#ifdef ACE_HOST_HAS_SDL
+	return s_chipTh && SDL_ThreadID() == s_chipThreadId;
+#else
+	return 0;
+#endif
+}
 
 static ULONG hwPtr(ULONG ulReg) {
 	if(!ulReg) {
@@ -366,7 +425,13 @@ static void customWriteUword(UWORD uwOffs, UWORD uwVal) {
 }
 
 void chipsetSyncCpuWrites(void) {
-	struct Custom *c = g_pHostCustom;
+	struct Custom *c;
+	int locked = 0;
+	if(!s_inChipset) {
+		chipLock();
+		locked = 1;
+	}
+	c = g_pHostCustom;
 	if(c->bltsize) {
 		blitterStart(c->bltsize);
 		s_lastBltsize = c->bltsize;
@@ -409,6 +474,9 @@ void chipsetSyncCpuWrites(void) {
 		}
 	}
 	updateVposRegs();
+	if(locked) {
+		chipUnlock();
+	}
 }
 
 static void resetSpritesForFrame(void) {
@@ -632,8 +700,13 @@ static int sprFetchWords(void) {
 }
 
 static void spriteFetchCtl(int ch) {
-	UWORD pos = readChipWord(s_sprPtr[ch]);
-	UWORD ctl = readChipWord(s_sprPtr[ch] + 2);
+	UWORD pos, ctl;
+	if(!s_sprPtr[ch]) {
+		return;
+	}
+	/* ACE writes tHardwareSpriteHeader as native UWORDs; pixel data stays BE. */
+	pos = *(const UWORD *)(uintptr_t)s_sprPtr[ch];
+	ctl = *(const UWORD *)(uintptr_t)(s_sprPtr[ch] + 2);
 	s_sprPtr[ch] += 4;
 	g_pHostCustom->sprpt[ch] = (APTR)s_sprPtr[ch];
 	s_sprY0[ch] = (pos >> 8) | ((ctl & 4) ? 0x100 : 0);
@@ -823,20 +896,16 @@ static void beginLine(void) {
 		copperJump(g_pHostCustom->cop1lc);
 		s_uwIntreq |= INTF_VERTB;
 		s_frameReady = 1;
+		s_vblankThisTick = 1;
 		s_blitSlotsLast = s_blitSlotsFrame;
 		s_blitSlotsFrame = 0;
 		s_copWaitHitN = 0;
-		/* Every emulated TOF is a wall-clock vblank: present + 50/60 Hz sleep.
-		 * WaitBlit / getRayPos / aceHostTick all share this so CIA+Paula stay
-		 * locked to the beam instead of running extra frames unsynced. */
-		if(s_vblankSync) {
-			s_vblankThisTick = 1;
-			aceHostDispatchInts(s_uwIntreq);
-			/* Skip-render TOF (exact wait wrap) has not painted this frame yet. */
-			if(!s_skipRender) {
-				aceHostOnVblank();
-				s_frameReady = 0;
-			}
+		aceHostDispatchInts(s_uwIntreq);
+		/* Present only on the game thread — SDL is not used from the chipset thread. */
+		if((!chipThreadIsRunning() || !chipIsChipThread()) &&
+			s_vblankSync && !s_skipRender) {
+			aceHostOnVblank();
+			s_frameReady = 0;
 		}
 	}
 	spriteLineDma();
@@ -959,7 +1028,10 @@ static void runOneSlot(void) {
 
 void chipsetRunSlots(unsigned n) {
 	unsigned i;
-	int nested = s_inChipset;
+	int nested;
+
+	chipLock();
+	nested = s_inChipset;
 	s_inChipset++;
 	if(!nested) {
 		chipsetSyncCpuWrites();
@@ -974,17 +1046,70 @@ void chipsetRunSlots(unsigned n) {
 		aceHostDispatchInts(s_uwIntreq);
 	}
 	s_inChipset--;
-	if(!s_inChipset) {
+	if(!s_inChipset && !chipIsChipThread()) {
 		ciaPollKbd();
+	}
+	chipUnlock();
+}
+
+#ifdef ACE_HOST_HAS_SDL
+static void chipThreadPace(void) {
+	unsigned hz = s_isPal ? 50u : 60u;
+	Uint64 period, now;
+	if(!s_threadPaceFreq) {
+		s_threadPaceFreq = SDL_GetPerformanceFrequency();
+		if(!s_threadPaceFreq) {
+			s_threadPaceFreq = 1000;
+		}
+	}
+	period = (s_threadPaceFreq + (hz / 2u)) / hz;
+	now = SDL_GetPerformanceCounter();
+	if(!s_threadPaceNext) {
+		s_threadPaceNext = now + period;
+		return;
+	}
+	if(now < s_threadPaceNext) {
+		Uint64 remainMs = (s_threadPaceNext - now) * 1000u / s_threadPaceFreq;
+		if(remainMs > 1u) {
+			SDL_Delay((Uint32)(remainMs - 1u));
+		}
+		while(SDL_GetPerformanceCounter() < s_threadPaceNext) {
+		}
+		now = SDL_GetPerformanceCounter();
+	}
+	if(now >= s_threadPaceNext + period) {
+		s_threadPaceNext = now + period;
+	}
+	else {
+		s_threadPaceNext += period;
 	}
 }
 
+static int SDLCALL chipThreadFn(void *ud) {
+	(void)ud;
+	s_chipThreadId = SDL_ThreadID();
+	while(s_chipRun) {
+		UWORD vpos;
+		chipsetRunSlots((unsigned)ACE_HOST_SLOTS_PER_LINE);
+		vpos = s_uwVpos;
+		if(vpos == 0) {
+			chipThreadPace();
+		}
+	}
+	return 0;
+}
+#endif
+
 void chipsetOnVposRead(void) {
-	/* Spin-wait loops (vPortWaitForEnd, viewLoad) call getRayPos() in a tight
-	 * CPU loop. Advancing a whole scanline per read keeps those waits at
-	 * ~one frame instead of ~70k slot-steps of Denise rendering. */
-	UWORD uwY = s_uwVpos;
-	unsigned guard = 0;
+	/* With the chipset thread running, VPOSR is live. Cooperative builds
+	 * still step a scanline per read so spin-waits finish. */
+	UWORD uwY;
+	unsigned guard;
+	if(chipThreadIsRunning() && !chipIsChipThread()) {
+		return;
+	}
+	uwY = s_uwVpos;
+	guard = 0;
 	while(s_uwVpos == uwY && guard++ < ACE_HOST_SLOTS_PER_LINE) {
 		chipsetRunSlots(1);
 	}
@@ -992,12 +1117,29 @@ void chipsetOnVposRead(void) {
 
 void chipsetWaitBlit(void) {
 	unsigned guard = 0;
+	chipLock();
 	chipsetSyncCpuWrites();
 	s_blitWait++;
 	while(blitterBusy() && guard++ < 4000000u) {
-		chipsetRunSlots(16);
+		if(chipThreadIsRunning() && !chipIsChipThread()) {
+			chipUnlock();
+#ifdef ACE_HOST_HAS_SDL
+			SDL_Delay(0);
+#endif
+			chipLock();
+			chipsetSyncCpuWrites();
+		}
+		else {
+			unsigned i;
+			s_inChipset++;
+			for(i = 0; i < 16; ++i) {
+				runOneSlot();
+			}
+			s_inChipset--;
+		}
 	}
 	s_blitWait--;
+	chipUnlock();
 }
 
 void chipsetWaitVblank(void) {
@@ -1006,8 +1148,21 @@ void chipsetWaitVblank(void) {
 	s_vblankSync = 1;
 	s_vblankThisTick = 0;
 	chipsetSyncCpuWrites();
-	while(!s_vblankThisTick && guard++ < limit) {
-		chipsetRunSlots((unsigned)ACE_HOST_SLOTS_PER_LINE);
+	if(chipThreadIsRunning() && !chipIsChipThread()) {
+		while(!s_vblankThisTick && guard++ < 4000000u) {
+#ifdef ACE_HOST_HAS_SDL
+			SDL_Delay(0);
+#endif
+		}
+	}
+	else {
+		while(!s_vblankThisTick && guard++ < limit) {
+			chipsetRunSlots((unsigned)ACE_HOST_SLOTS_PER_LINE);
+		}
+	}
+	if(s_frameReady && (!chipThreadIsRunning() || !chipIsChipThread())) {
+		aceHostOnVblank();
+		s_frameReady = 0;
 	}
 }
 
@@ -1015,6 +1170,10 @@ void aceHostTick(void) {
 	s_vblankSync = 1;
 	if(!s_vblankThisTick) {
 		chipsetWaitVblank();
+	}
+	else if(s_frameReady) {
+		aceHostOnVblank();
+		s_frameReady = 0;
 	}
 	s_vblankThisTick = 0;
 }
@@ -1033,6 +1192,26 @@ void chipsetRunUntilVpos(UWORD uwY, int isExact) {
 	chipsetSyncCpuWrites();
 	if(isExact && uwY == 0) {
 		chipsetWaitVblank();
+		return;
+	}
+	if(chipThreadIsRunning() && !chipIsChipThread()) {
+		if(isExact) {
+			while(s_uwVpos >= uwY && guard++ < 4000000u) {
+#ifdef ACE_HOST_HAS_SDL
+				SDL_Delay(0);
+#endif
+			}
+		}
+		guard = 0;
+		while(s_uwVpos < uwY && guard++ < 4000000u) {
+#ifdef ACE_HOST_HAS_SDL
+			SDL_Delay(0);
+#endif
+		}
+		if(s_vblankThisTick && s_frameReady) {
+			aceHostOnVblank();
+			s_frameReady = 0;
+		}
 		return;
 	}
 	if(isExact) {
@@ -1234,7 +1413,41 @@ void chipsetInit(int isPal) {
 	beginLine();
 }
 
+void chipsetStartThread(void) {
+#ifdef ACE_HOST_HAS_SDL
+	if(s_chipTh) {
+		return;
+	}
+	if(!s_chipMx) {
+		s_chipMx = SDL_CreateMutex();
+	}
+	s_chipRun = 1;
+	s_threadPaceNext = 0;
+	s_threadPaceFreq = 0;
+	s_chipTh = SDL_CreateThread(chipThreadFn, "ace-chipset", NULL);
+	if(!s_chipTh) {
+		s_chipRun = 0;
+		fprintf(stderr, "[ACE_HOST] chipset thread failed: %s\n", SDL_GetError());
+	}
+#endif
+}
+
+int chipsetThreadRunning(void) {
+	return chipThreadIsRunning();
+}
+
 void chipsetShutdown(void) {
+#ifdef ACE_HOST_HAS_SDL
+	if(s_chipTh) {
+		s_chipRun = 0;
+		SDL_WaitThread(s_chipTh, NULL);
+		s_chipTh = NULL;
+	}
+	if(s_chipMx) {
+		SDL_DestroyMutex(s_chipMx);
+		s_chipMx = NULL;
+	}
+#endif
 	paulaShutdown();
 }
 
