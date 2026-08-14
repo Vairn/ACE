@@ -9,6 +9,7 @@ We want to keep those docs as elaborate and easy to understand as possible.
 - [Compiler setup](installing/compiler.md)
 - [Building ACE](installing/ace.md)
 - [Building tools](installing/tools.md)
+- [ACE_HOST (Windows port / PC development)](programming/ace_host.md)
 
 ## Tutorial
 
@@ -34,6 +35,7 @@ We want to keep those docs as elaborate and easy to understand as possible.
 1. Double buffering
 1. [Sprites](programming/sprites.md)
 1. [Working with and without OS](programming/os.md)
+1. [ACE_HOST — port ACE games to Windows](programming/ace_host.md)
 1. DMA usage
 1. [Multi-directional large tilemaps scrolling with TileBuffer](programming/tilebuffer.md)
 1. [Advanced Sprites](programming/advancedsprites.md)

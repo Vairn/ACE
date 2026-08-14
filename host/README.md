@@ -1,7 +1,11 @@
 # ACE host SDL chipset backend
 
-Host build of ACE that keeps the real copper, blit, extview, and viewport managers.
-AMIGA and ACE_HOST are both defined. Chipset time is DMA-slot based (Agnus), not instant blit.
+**Full documentation:** [docs/programming/ace_host.md](../docs/programming/ace_host.md)
+(Windows port + development: architecture, CMake flags, env vars, HUD).
+
+Windows port of ACE (and a PC development backend). Same copper, blit, extview,
+and viewport managers; AMIGA and ACE_HOST are both defined. Chipset time is
+DMA-slot based (Agnus), not instant blit.
 
 ## Dependencies
 

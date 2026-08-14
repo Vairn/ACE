@@ -58,3 +58,10 @@ Some notes:
 
 After building, you should have a bunch of `.o` files or `libace.a` in your build folder.
 Be sure to link it to your game.
+
+## Host (Windows port / PC development)
+
+To port an ACE game to Windows (or to develop on PC), pass `-DACE_HOST=ON` and
+do **not** set an m68k toolchain. Same ACE sources; SDL supplies video, audio,
+and input. Documented in [ACE_HOST](../programming/ace_host.md). Amiga
+cross-builds are unchanged: leave `ACE_HOST` off.

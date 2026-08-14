@@ -201,24 +201,21 @@ if(ACE_HOST)
 	)
 
 	target_sources(${TARGET_NAME} PRIVATE
-		host/chipset/host_os.c
-		host/chipset/memory.c
-		host/chipset/stdlib_alloc.c
-		host/chipset/chipset.c
-		host/chipset/blitter.c
-		host/chipset/cia.c
-		host/chipset/paula.c
-		host/system_host.c
-		host/sdl/sdl_host.c
-		host/debug/hud.c
-		host/debug/crash.c
-		host/mixer/mixer.c
+		host/src/chipset/host_os.c
+		host/src/chipset/memory.c
+		host/src/chipset/stdlib_alloc.c
+		host/src/chipset/chipset.c
+		host/src/chipset/blitter.c
+		host/src/chipset/cia.c
+		host/src/chipset/paula.c
+		host/src/system_host.c
+		host/src/sdl/sdl_host.c
+		host/src/debug/hud.c
+		host/src/debug/crash.c
+		host/src/mixer/mixer.c
 	)
 	target_include_directories(${TARGET_NAME} PUBLIC
 		${PROJECT_SOURCE_DIR}/host/include
-	)
-	target_include_directories(${TARGET_NAME} PRIVATE
-		${PROJECT_SOURCE_DIR}/host/chipset
 	)
 	if(NOT MSVC AND NOT APPLE)
 		# Route libc malloc through AllocMem(MEMF_ANY). SDL is pointed at the

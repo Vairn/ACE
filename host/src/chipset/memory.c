@@ -297,7 +297,10 @@ void aceHostMemInit(
 			if(!ulChip) {
 				ulChip = 512u * 1024u;
 			}
-			fastInWindow = (eMachine == ACE_HOST_MACHINE_A500_512_512);
+			/* Trapdoor FAST at 0xC00000 fits under custom ($DFF000). */
+			if(ulFast && ulFast <= (ACE_HOST_CUSTOM_OFFS - ACE_HOST_A500_FAST_OFFS)) {
+				fastInWindow = 1;
+			}
 			break;
 	}
 

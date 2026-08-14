@@ -11,6 +11,8 @@ Current feature set is OCS-oriented, although produced code should work on AGA j
 AGA features have been added recently and should work but they weren't thoroughly battle-tested.
 
 For build instructions basic how to and contributing guidelines, refer to [docs](docs/README.md).
+To port ACE games to Windows (or develop them on PC) with the SDL chipset
+backend, see [ACE_HOST](docs/programming/ace_host.md).
 
 ## Why I should use ACE?
 
