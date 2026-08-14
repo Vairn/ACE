@@ -271,7 +271,7 @@ function(convertAudio)
 		set(argsOptional ${argsOptional} -c)
 	endif()
 	if(${args_PAD_BYTES})
-		set(argsOptional ${argsOptional} -pad ${args_PAD_BYTES})
+		set(argsOptional ${argsOptional} -fpad ${args_PAD_BYTES})
 	endif()
 
 	if(${args_CHECK_DIVIDED_AMPLITUDE})

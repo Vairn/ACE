@@ -54,7 +54,7 @@ static UWORD s_uwBgBufferLength;
 static UBYTE s_ubBobsSaved;
 #endif
 
-tBobQueue s_pQueues[2];
+static tBobQueue s_pQueues[2];
 
 //------------------------------------------------------------------ PRIVATE FNS
 

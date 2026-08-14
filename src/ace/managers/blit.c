@@ -267,6 +267,9 @@ UBYTE blitUnsafeCopy(
 #else
 		g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
+#ifdef ACE_HOST
+		blitWait();
+#endif
 	}
 	else {
 		wSrcModulo = pSrc->BytesPerRow - uwBlitWords * 2;
@@ -349,7 +352,9 @@ UBYTE blitUnsafeCopyAligned(
 #else
 		g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
 #endif
-
+#ifdef ACE_HOST
+		blitWait();
+#endif
 	}
 	else {
 		if(bitmapIsInterleaved(pSrc) || bitmapIsInterleaved(pDst)) {
@@ -516,6 +521,9 @@ UBYTE blitUnsafeCopyMask(
 		g_pCustom->bltsizh = ECS_BLTSIZH_STROBE(uwBlitWords);
 #else
 		g_pCustom->bltsize = (wHeight << HSIZEBITS) | uwBlitWords;
+#endif
+#ifdef ACE_HOST
+		blitWait();
 #endif
 	}
 	else {

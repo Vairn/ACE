@@ -99,8 +99,9 @@ void InitBitMap(struct BitMap *bm, LONG depth, ULONG width, ULONG height) {
 }
 
 LONG WaitTOF(void) {
-	chipsetRunUntilVpos(0, 1);
-	chipsetRunUntilVpos(1, 0);
+	/* Next top-of-form. chipsetWaitVblank() runs the beam until the wrap
+	 * and sleeps there so this matches aceHostTick / WaitBlit vblank sync. */
+	chipsetWaitVblank();
 	return 0;
 }
 
@@ -372,9 +373,21 @@ void aceHostDispatchInts(UWORD uwPending) {
 		timerOnInterrupt();
 		handled |= INTF_VERTB;
 	}
+	/* One-shot SFX disable DMA from the AUDx handler. ptplayer clears
+	 * INTF_INTEN around some SFX setup, so AUD must not wait on it. */
+	for(i = INTB_AUD0; i <= INTB_AUD3; ++i) {
+		UWORD bit = (UWORD)(1u << i);
+		if((uwPending & bit) && s_pAceInterrupts[i].pHandler) {
+			s_pAceInterrupts[i].pHandler(g_pCustom, s_pAceInterrupts[i].pData);
+			handled |= bit;
+		}
+	}
 	if(ena & INTF_INTEN) {
 		for(i = 0; i < 14; ++i) {
 			UWORD bit = (UWORD)(1u << i);
+			if(i >= INTB_AUD0 && i <= INTB_AUD3) {
+				continue;
+			}
 			if((uwPending & bit) && (ena & bit) && s_pAceInterrupts[i].pHandler) {
 				s_pAceInterrupts[i].pHandler(g_pCustom, s_pAceInterrupts[i].pData);
 				handled |= bit;

@@ -197,11 +197,17 @@ void viewUpdateGlobalPalette(const tView *pView) {
 			for(UBYTE i = 0; i < 32; ++i) {
 				g_pCustom->color[i] = pView->pFirstVPort->pPalette[i];
 			}
+#ifdef ACE_HOST
+			chipsetSyncCpuWrites();
+#endif
 		}
 #else
 		for(UBYTE i = 0; i < 32; ++i) {
 			g_pCustom->color[i] = pView->pFirstVPort->pPalette[i];
 		}
+#ifdef ACE_HOST
+		chipsetSyncCpuWrites();
+#endif
 #endif
 	}
 #endif // AMIGA
@@ -549,12 +555,17 @@ void vPortWaitForPos(const tVPort *pVPort, UWORD uwPosY, UBYTE isExact) {
 	}
 #endif
 
+#ifdef ACE_HOST
+	/* Host VPOSR is not live MMIO; drive the beam with a guarded slot run. */
+	chipsetRunUntilVpos(uwEndPos, isExact);
+#else
 	if(isExact) {
 		// If current beam pos is on or past end pos, wait for start of next frame
 		while (getRayPos().bfPosY >= uwEndPos) continue;
 	}
 	// If current beam pos is before end pos, wait for it
 	while (getRayPos().bfPosY < uwEndPos) continue;
+#endif
 #endif // AMIGA
 }
 

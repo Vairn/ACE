@@ -94,9 +94,6 @@ void genericProcess(void) {
 	keyProcess();
 
     stateProcess(g_pGameStateManager);
-#ifdef ACE_HOST
-	aceHostTick();
-#endif
 }
 
 void genericDestroy(void) {

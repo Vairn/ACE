@@ -16,8 +16,10 @@ static UWORD s_uwDmacon;
 static UWORD s_uwIntena;
 static UWORD s_uwIntreq;
 static int s_inChipset;
+static int s_skipRender;
 static int s_frameReady;
 static int s_vblankThisTick;
+static int s_vblankSync;
 static int s_blitWait;
 static int s_eClockAcc;
 static int s_bplBusyRemain;
@@ -50,6 +52,8 @@ static int s_sprArmed[8];
 static int s_sprActive[8];
 static UWORD s_sprDatA[8][4], s_sprDatB[8][4];
 static int s_sprX[8], s_sprY0[8], s_sprY1[8], s_sprAttach[8];
+/* First sprite DMA line (HRM). Copper writes SPRxPT during vblank first. */
+#define SPRITE_DMA_FIRST_LINE 25
 
 static UWORD s_lastBltsize, s_lastCopjmp1, s_lastCopjmp2;
 static UWORD s_lastDmaconW, s_lastIntenaW, s_lastIntreqW;
@@ -68,6 +72,16 @@ static ULONG hwPtr(ULONG ulReg) {
 			return (ULONG)(uintptr_t)aceHostBusToPtr(ulReg);
 		}
 		return ulReg;
+	}
+	/* Copper may store 16-bit halves swapped on LE if a MOVE missed the ptr path. */
+	{
+		ULONG ulSw = (ulReg << 16) | (ulReg >> 16);
+		if(ulSw && aceHostIsChipAddr(ulSw)) {
+			if(ulSw < ACE_HOST_BUS_SIZE) {
+				return (ULONG)(uintptr_t)aceHostBusToPtr(ulSw);
+			}
+			return ulSw;
+		}
 	}
 	{
 		static int s_warned;
@@ -397,10 +411,15 @@ void chipsetSyncCpuWrites(void) {
 	updateVposRegs();
 }
 
-static void latchSprPtrs(void) {
+static void resetSpritesForFrame(void) {
 	int i;
 	for(i = 0; i < 8; ++i) {
-		s_sprPtr[i] = hwPtr(g_pHostCustom->sprpt[i]);
+		s_sprArmed[i] = 0;
+		s_sprActive[i] = 0;
+		s_sprPtr[i] = 0;
+		s_sprX[i] = s_sprY0[i] = s_sprY1[i] = s_sprAttach[i] = 0;
+		memset(s_sprDatA[i], 0, sizeof(s_sprDatA[i]));
+		memset(s_sprDatB[i], 0, sizeof(s_sprDatB[i]));
 	}
 }
 
@@ -613,9 +632,8 @@ static int sprFetchWords(void) {
 }
 
 static void spriteFetchCtl(int ch) {
-	UWORD *p = (UWORD *)(uintptr_t)s_sprPtr[ch];
-	UWORD pos = p ? p[0] : 0;
-	UWORD ctl = p ? p[1] : 0;
+	UWORD pos = readChipWord(s_sprPtr[ch]);
+	UWORD ctl = readChipWord(s_sprPtr[ch] + 2);
 	s_sprPtr[ch] += 4;
 	g_pHostCustom->sprpt[ch] = (APTR)s_sprPtr[ch];
 	s_sprY0[ch] = (pos >> 8) | ((ctl & 4) ? 0x100 : 0);
@@ -626,20 +644,55 @@ static void spriteFetchCtl(int ch) {
 	s_sprActive[ch] = 0;
 }
 
-static void spriteFetchDataSlot(int ch, int phase) {
+static void spriteFetchLineData(int ch) {
 	int i, nw = sprFetchWords();
-	UWORD *pDst = phase ? s_sprDatB[ch] : s_sprDatA[ch];
-	if(!phase) {
-		for(i = 0; i < 4; ++i) {
-			s_sprDatA[ch][i] = 0;
-			s_sprDatB[ch][i] = 0;
-		}
+	for(i = 0; i < 4; ++i) {
+		s_sprDatA[ch][i] = 0;
+		s_sprDatB[ch][i] = 0;
 	}
 	for(i = 0; i < nw; ++i) {
-		pDst[i] = readChipWord(s_sprPtr[ch]);
+		s_sprDatA[ch][i] = readChipWord(s_sprPtr[ch]);
+		s_sprPtr[ch] += 2;
+	}
+	for(i = 0; i < nw; ++i) {
+		s_sprDatB[ch][i] = readChipWord(s_sprPtr[ch]);
 		s_sprPtr[ch] += 2;
 	}
 	g_pHostCustom->sprpt[ch] = (APTR)s_sprPtr[ch];
+}
+
+static void spriteLineDma(void) {
+	int ch;
+	int dmaOn = (s_uwDmacon & DMAF_SPRITE) && (s_uwDmacon & DMAF_MASTER);
+	if(!dmaOn || (int)s_uwVpos < SPRITE_DMA_FIRST_LINE) {
+		return;
+	}
+	for(ch = 0; ch < 8; ++ch) {
+		if(!s_sprArmed[ch]) {
+			s_sprPtr[ch] = hwPtr(g_pHostCustom->sprpt[ch]);
+			if(s_sprPtr[ch]) {
+				spriteFetchCtl(ch);
+			}
+		}
+		if(s_sprArmed[ch] && (int)s_uwVpos == s_sprY0[ch]) {
+			s_sprActive[ch] = 1;
+		}
+		if(s_sprActive[ch] && (int)s_uwVpos >= s_sprY1[ch]) {
+			s_sprActive[ch] = 0;
+			s_sprArmed[ch] = 0;
+			/* VSTOP line fetches the next sprite's control (chain / terminator). */
+			s_sprPtr[ch] = hwPtr(g_pHostCustom->sprpt[ch]);
+			if(!s_sprPtr[ch]) {
+				s_sprPtr[ch] = (ULONG)g_pHostCustom->sprpt[ch];
+			}
+			if(s_sprPtr[ch]) {
+				spriteFetchCtl(ch);
+			}
+		}
+		if(s_sprActive[ch]) {
+			spriteFetchLineData(ch);
+		}
+	}
 }
 
 static int spritePixel(int x, int *pColor, int *pPri) {
@@ -698,6 +751,9 @@ static int spritePixel(int x, int *pColor, int *pPri) {
 }
 
 static void renderSlotPixels(void) {
+	if(s_skipRender) {
+		return;
+	}
 	int yDisp = (int)s_uwVpos - diwV0();
 	int h0 = diwH0();
 	int hires = isHires();
@@ -735,10 +791,8 @@ static void renderSlotPixels(void) {
 		}
 		rgb = colorLookup(idx);
 		if((s_uwDmacon & DMAF_SPRITE) && spritePixel(hxLores, &sprCol, &sprPri)) {
-			int pfPri = (int)(g_pHostCustom->bplcon2 & 7);
-			if(sprCol && (sprPri < pfPri || idx == 0)) {
-				rgb = colorLookup(sprCol);
-			}
+			(void)sprPri;
+			rgb = colorLookup(sprCol);
 		}
 		plotSlot(xDisp, yDisp, hires, rgb);
 	}
@@ -752,20 +806,12 @@ static int spriteSlotChannel(UWORD h) {
 }
 
 static void beginLine(void) {
-	int ch;
 	memset(s_lineDma, ACE_HOST_DMA_IDLE, sizeof(s_lineDma));
 	s_bplFetchIdx = 0;
 	s_bplWordsThisLine = 0;
 	s_bplBusyRemain = 0;
 	s_copSlotRemain = 0;
 	if(s_uwVpos == 0) {
-		latchSprPtrs();
-		copperJump(g_pHostCustom->cop1lc);
-		s_uwIntreq |= INTF_VERTB;
-		s_frameReady = 1;
-		s_blitSlotsLast = s_blitSlotsFrame;
-		s_blitSlotsFrame = 0;
-		s_copWaitHitN = 0;
 		s_frameCount++;
 		if(s_timingLog && s_linesLastFrame && (s_frameCount % 50u) == 1u) {
 			fprintf(stderr,
@@ -773,16 +819,27 @@ static void beginLine(void) {
 				s_frameCount, s_linesLastFrame, s_lines, s_lastCopWaitY,
 				s_blitSlotsLast, s_timingOk);
 		}
-	}
-	for(ch = 0; ch < 8; ++ch) {
-		if(s_sprArmed[ch] && (int)s_uwVpos == s_sprY0[ch]) {
-			s_sprActive[ch] = 1;
+		resetSpritesForFrame();
+		copperJump(g_pHostCustom->cop1lc);
+		s_uwIntreq |= INTF_VERTB;
+		s_frameReady = 1;
+		s_blitSlotsLast = s_blitSlotsFrame;
+		s_blitSlotsFrame = 0;
+		s_copWaitHitN = 0;
+		/* Every emulated TOF is a wall-clock vblank: present + 50/60 Hz sleep.
+		 * WaitBlit / getRayPos / aceHostTick all share this so CIA+Paula stay
+		 * locked to the beam instead of running extra frames unsynced. */
+		if(s_vblankSync) {
+			s_vblankThisTick = 1;
+			aceHostDispatchInts(s_uwIntreq);
+			/* Skip-render TOF (exact wait wrap) has not painted this frame yet. */
+			if(!s_skipRender) {
+				aceHostOnVblank();
+				s_frameReady = 0;
+			}
 		}
-		if(s_sprActive[ch] && (int)s_uwVpos >= s_sprY1[ch]) {
-			s_sprActive[ch] = 0;
-			s_sprArmed[ch] = 0;
-		}
 	}
+	spriteLineDma();
 }
 
 static void endLine(void) {
@@ -800,7 +857,6 @@ static void runOneSlot(void) {
 	int used = 0;
 	tAceHostDmaKind kind = ACE_HOST_DMA_IDLE;
 	int sprCh;
-	int sprPhase;
 	int period;
 
 	if(++s_eClockAcc >= 5) {
@@ -823,14 +879,8 @@ static void runOneSlot(void) {
 	}
 
 	sprCh = spriteSlotChannel(h);
-	sprPhase = sprCh >= 0 ? (int)((h - 0x15) & 1) : 0;
-	if(!used && sprCh >= 0 && (s_uwDmacon & DMAF_SPRITE) && (s_uwDmacon & DMAF_MASTER)) {
-		if(!s_sprArmed[sprCh] && s_sprPtr[sprCh] && !sprPhase) {
-			spriteFetchCtl(sprCh);
-		}
-		else if(s_sprActive[sprCh]) {
-			spriteFetchDataSlot(sprCh, sprPhase);
-		}
+	if(!used && sprCh >= 0 && (s_uwDmacon & DMAF_SPRITE) && (s_uwDmacon & DMAF_MASTER) &&
+		(int)s_uwVpos >= SPRITE_DMA_FIRST_LINE) {
 		kind = ACE_HOST_DMA_SPRITE;
 		used = 1;
 	}
@@ -923,11 +973,6 @@ void chipsetRunSlots(unsigned n) {
 	if(!nested) {
 		aceHostDispatchInts(s_uwIntreq);
 	}
-	if(s_frameReady && !s_blitWait) {
-		s_frameReady = 0;
-		s_vblankThisTick = 1;
-		aceHostOnVblank();
-	}
 	s_inChipset--;
 	if(!s_inChipset) {
 		ciaPollKbd();
@@ -935,7 +980,14 @@ void chipsetRunSlots(unsigned n) {
 }
 
 void chipsetOnVposRead(void) {
-	chipsetRunSlots(1);
+	/* Spin-wait loops (vPortWaitForEnd, viewLoad) call getRayPos() in a tight
+	 * CPU loop. Advancing a whole scanline per read keeps those waits at
+	 * ~one frame instead of ~70k slot-steps of Denise rendering. */
+	UWORD uwY = s_uwVpos;
+	unsigned guard = 0;
+	while(s_uwVpos == uwY && guard++ < ACE_HOST_SLOTS_PER_LINE) {
+		chipsetRunSlots(1);
+	}
 }
 
 void chipsetWaitBlit(void) {
@@ -948,16 +1000,21 @@ void chipsetWaitBlit(void) {
 	s_blitWait--;
 }
 
+void chipsetWaitVblank(void) {
+	unsigned guard = 0;
+	unsigned limit = (unsigned)s_lines * 2u + 2u;
+	s_vblankSync = 1;
+	s_vblankThisTick = 0;
+	chipsetSyncCpuWrites();
+	while(!s_vblankThisTick && guard++ < limit) {
+		chipsetRunSlots((unsigned)ACE_HOST_SLOTS_PER_LINE);
+	}
+}
+
 void aceHostTick(void) {
+	s_vblankSync = 1;
 	if(!s_vblankThisTick) {
-		if(s_frameReady) {
-			s_frameReady = 0;
-			s_vblankThisTick = 1;
-			aceHostOnVblank();
-		}
-		else {
-			chipsetRunSlots((unsigned)s_lines * ACE_HOST_SLOTS_PER_LINE);
-		}
+		chipsetWaitVblank();
 	}
 	s_vblankThisTick = 0;
 }
@@ -974,14 +1031,27 @@ int chipsetBlitIsBusy(void) {
 void chipsetRunUntilVpos(UWORD uwY, int isExact) {
 	unsigned guard = 0;
 	chipsetSyncCpuWrites();
+	if(isExact && uwY == 0) {
+		chipsetWaitVblank();
+		return;
+	}
 	if(isExact) {
+		/* Past the wait line: run to TOF without painting. Visible lines
+		 * below must render so palette fades (and other COLOR updates)
+		 * actually reach the framebuffer. */
+		s_skipRender = 1;
 		while(s_uwVpos >= uwY && guard++ < 4000000u) {
-			chipsetRunSlots(8);
+			chipsetRunSlots(ACE_HOST_SLOTS_PER_LINE);
 		}
+		s_skipRender = 0;
 	}
 	guard = 0;
 	while(s_uwVpos < uwY && guard++ < 4000000u) {
-		chipsetRunSlots(8);
+		chipsetRunSlots(ACE_HOST_SLOTS_PER_LINE);
+	}
+	if(s_vblankThisTick && s_frameReady) {
+		aceHostOnVblank();
+		s_frameReady = 0;
 	}
 }
 
@@ -1033,6 +1103,12 @@ void chipsetRaiseInt(UWORD uwMask) {
 	s_uwIntreq |= uwMask;
 	if(g_pHostCustom) {
 		g_pHostCustom->intreqr = s_uwIntreq;
+	}
+	/* Paula AUDx must run the ptplayer handler as soon as the buffer ends,
+	 * not at the next vblank — otherwise one-shot SFX loop for a full frame
+	 * (or forever if INTENA never sees the bit). */
+	if(uwMask & (INTF_AUD0 | INTF_AUD1 | INTF_AUD2 | INTF_AUD3)) {
+		aceHostDispatchInts(uwMask & (INTF_AUD0 | INTF_AUD1 | INTF_AUD2 | INTF_AUD3));
 	}
 }
 
@@ -1124,6 +1200,7 @@ void chipsetReset(void) {
 	s_linesLastFrame = 0;
 	s_timingOk = 1;
 	memset(s_fb, 0, sizeof(s_fb));
+	resetSpritesForFrame();
 	memset(s_colorHi, 0, sizeof(s_colorHi));
 	memset(s_colorLo, 0, sizeof(s_colorLo));
 	memset(s_colorSeen, 0, sizeof(s_colorSeen));

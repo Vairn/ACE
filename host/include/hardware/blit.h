@@ -40,6 +40,7 @@
 #define OVFLAG    0x20
 #define SIGNFLAG  0x40
 #define BLITREVERSE 0x02
+#define BC1F_DESC BLITREVERSE
 #define SING      0x02
 #define AUL       0x04
 #define SUL       0x08

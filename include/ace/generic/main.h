@@ -31,6 +31,9 @@ extern "C" {
 #include <ace/managers/blit.h>
 #include <ace/managers/copper.h>
 #include <ace/managers/game.h>
+#ifdef ACE_HOST
+void aceHostTick(void);
+#endif
 
 #ifndef GENERIC_MAIN_LOG_PATH
 #define GENERIC_MAIN_LOG_PATH 0
@@ -121,6 +124,9 @@ int main(void) {
 		timerProcess();
 #endif
 		genericProcess();
+#ifdef ACE_HOST
+		aceHostTick();
+#endif
 	}
 	genericDestroy();
 

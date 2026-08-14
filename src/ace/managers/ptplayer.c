@@ -15,6 +15,10 @@
 #include <ace/utils/custom.h>
 #include <ace/utils/disk_file.h>
 #include <ace/utils/endian.h>
+#ifdef ACE_HOST
+#include <ace_host/chipset.h>
+#include <ace_host/mixer.h>
+#endif
 #include <hardware/intbits.h>
 #include <hardware/dmabits.h>
 
@@ -29,8 +33,14 @@
 // #define PTPLAYER_DEFER_INTERRUPTS
 
 // If set, uses audio interrupt handlers instead of polling intbits for checking
-// if channel is idle. May be better in the long run for os-friendly use. Buggy!
+// if channel is idle. May be better in the long run for os-friendly use. Buggy
+// on Amiga. On the host, Paula never idles a 1-word loop by itself, so one-shot
+// SFX keep DMA-looping unless this path disables the channel after the first pass.
+#ifdef ACE_HOST
+#define PTPLAYER_USE_AUDIO_INT_HANDLERS
+#else
 // #define PTPLAYER_USE_AUDIO_INT_HANDLERS
+#endif
 
 // TODO: ENABLE_SAWRECT from ptplayer 6.1?
 // TODO: MINIMAL from ptplayer?
@@ -1743,6 +1753,13 @@ static void INTERRUPT onAudio(
 	REGARG(volatile void *pData, "a1")
 ) {
 	UBYTE ubChannelIndex = (ULONG)pData;
+#ifdef ACE_HOST
+	/* Host mixer owns AUD3 as a continuous DMA stream. Do not treat that
+	 * interrupt as a ptplayer one-shot and disable the channel. */
+	if(ubChannelIndex == 3 && aceHostMixerOwnsAud3()) {
+		return;
+	}
+#endif
 	s_uChannelDone.pChannels[ubChannelIndex] = 1;
 
 	if(s_pAudioChannelPendingDisable[ubChannelIndex]) {
@@ -1765,7 +1782,13 @@ void ptplayerDestroy(void) {
 	systemSetInt(INTB_AUD0, 0, 0);
 	systemSetInt(INTB_AUD1, 0, 0);
 	systemSetInt(INTB_AUD2, 0, 0);
+#ifdef ACE_HOST
+	if(!aceHostMixerOwnsAud3()) {
+		systemSetInt(INTB_AUD3, 0, 0);
+	}
+#else
 	systemSetInt(INTB_AUD3, 0, 0);
+#endif
 #endif
 }
 
@@ -1794,7 +1817,13 @@ void ptplayerCreate(UBYTE isPal) {
 	systemSetInt(INTB_AUD0, onAudio, (void*)0);
 	systemSetInt(INTB_AUD1, onAudio, (void*)1);
 	systemSetInt(INTB_AUD2, onAudio, (void*)2);
+#ifdef ACE_HOST
+	if(!aceHostMixerOwnsAud3()) {
+		systemSetInt(INTB_AUD3, onAudio, (void*)3);
+	}
+#else
 	systemSetInt(INTB_AUD3, onAudio, (void*)3);
+#endif
 #endif
 
 	ptplayerSetPal(isPal);
@@ -1861,6 +1890,10 @@ void ptplayerLoadMod(
 		const tPtplayerSampleHeader *pHeader = &s_pCurrentMod->pSampleHeaders[i];
 		if(s_pCurrentMod->pSampleHeaders[i].uwLength > 0) {
 			// Make sure each sample starts with two 0-bytes
+			if(!mt_SampleStarts[i]) {
+				logWrite("ERR: Sample %hhu has length but null start\n", i);
+				continue;
+			}
 			mt_SampleStarts[i][0] = 0;
 			logWrite(
 				"Sample %hhu name: '%.*s', word length: %hu, start: %p, repeat offs: %hu, repeat len:%hu\n",
@@ -3284,18 +3317,38 @@ void ptplayerSfxPlay(
 
 void ptplayerWaitForSfx(void) {
 	UBYTE isAnyChannelBusy;
+#ifdef ACE_HOST
+	unsigned guard = 0;
+	UBYTE isLogged = 0;
+#endif
 	do {
 		isAnyChannelBusy = 0;
 		for(UBYTE i = 0; i < 4; ++i) {
 			// Wait only for sfx to end - mod is looping ad infinitum anyway.
 			if(mt_chan[i].ubSfxPriority) {
+#ifdef ACE_HOST
+				if(!isLogged) {
+					logWrite("sfx ptplayerWaitForSfx\n");
+					isLogged = 1;
+				}
+#else
 				logWrite("sfx ptplayerWaitForSfx\n");
-				// channel is busy by sfx
+#endif
 				isAnyChannelBusy = 1;
-				// logWrite("channel busy %hhu", i);
 				break;
 			}
 		}
+#ifdef ACE_HOST
+		/* Host chipset only advances when we run slots; a CPU spin never
+		 * lets Paula finish the sample or CIA tick mt_sfxonly. */
+		if(isAnyChannelBusy) {
+			chipsetRunSlots((unsigned)ACE_HOST_SLOTS_PER_LINE);
+			if(++guard >= 4000000u) {
+				logWrite("ERR: ptplayerWaitForSfx timed out\n");
+				break;
+			}
+		}
+#endif
 	} while(isAnyChannelBusy);
 }
 

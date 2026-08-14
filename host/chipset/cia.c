@@ -4,6 +4,7 @@
 static tCia *s_cia[2];
 static UWORD s_latchA[2], s_latchB[2];
 static UWORD s_timerA[2], s_timerB[2];
+static UWORD s_dispA[2], s_dispB[2];
 static UBYTE s_icrMask[2], s_icrData[2];
 
 #define KBD_Q 32
@@ -24,6 +25,12 @@ void ciaInit(tCia *pCiaA, tCia *pCiaB) {
 	s_latchB[0] = s_latchB[1] = 0xFFFF;
 	s_timerA[0] = s_timerA[1] = 0xFFFF;
 	s_timerB[0] = s_timerB[1] = 0xFFFF;
+	s_dispA[0] = s_dispA[1] = 0xFFFF;
+	s_dispB[0] = s_dispB[1] = 0xFFFF;
+	pCiaA->talo = pCiaB->talo = 0xFF;
+	pCiaA->tahi = pCiaB->tahi = 0xFF;
+	pCiaA->tblo = pCiaB->tblo = 0xFF;
+	pCiaA->tbhi = pCiaB->tbhi = 0xFF;
 	s_kbdH = s_kbdT = 0;
 	s_kbdBusy = 0;
 }
@@ -50,13 +57,21 @@ static void underflowB(int i) {
 	aceHostFireCia((UBYTE)i, CIAICRB_TIMER_B);
 }
 
-/* One E-clock tick (CCK/5). Called every 5 DMA slots. */
+/* One E-clock tick (CCK/5). Called every 5 DMA slots.
+ * TALO/TAHI are both the latch (CPU writes) and the running count (CPU reads).
+ * Capture a write when the visible value differs from what we last stored. */
 void ciaRunEclockTick(void) {
 	int i;
 	for(i = 0; i < 2; ++i) {
 		tCia *c = s_cia[i];
-		s_latchA[i] = (UWORD)((c->tahi << 8) | c->talo);
-		s_latchB[i] = (UWORD)((c->tbhi << 8) | c->tblo);
+		UWORD liveA = (UWORD)((c->tahi << 8) | c->talo);
+		UWORD liveB = (UWORD)((c->tbhi << 8) | c->tblo);
+		if(liveA != s_dispA[i]) {
+			s_latchA[i] = liveA;
+		}
+		if(liveB != s_dispB[i]) {
+			s_latchB[i] = liveB;
+		}
 		if(c->cra & CIACRA_LOAD) {
 			s_timerA[i] = s_latchA[i];
 			c->cra &= (UBYTE)~CIACRA_LOAD;
@@ -81,10 +96,12 @@ void ciaRunEclockTick(void) {
 				underflowB(i);
 			}
 		}
-		c->talo = (UBYTE)(s_timerA[i] & 0xFF);
-		c->tahi = (UBYTE)(s_timerA[i] >> 8);
-		c->tblo = (UBYTE)(s_timerB[i] & 0xFF);
-		c->tbhi = (UBYTE)(s_timerB[i] >> 8);
+		s_dispA[i] = s_timerA[i];
+		s_dispB[i] = s_timerB[i];
+		c->talo = (UBYTE)(s_dispA[i] & 0xFF);
+		c->tahi = (UBYTE)(s_dispA[i] >> 8);
+		c->tblo = (UBYTE)(s_dispB[i] & 0xFF);
+		c->tbhi = (UBYTE)(s_dispB[i] >> 8);
 	}
 }
 

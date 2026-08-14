@@ -261,14 +261,27 @@ void spriteProcess(tSprite *pSprite) {
 	UWORD uwHStart = s_pView->ubPosX - 1 + pSprite->wX; // For diwstrt 0x81, x offset equal to 128 worked fine, hence -1
 
 	tHardwareSpriteHeader *pHeader = (tHardwareSpriteHeader*)(pSprite->pBitmap->Planes[0]);
-	pHeader->uwRawPos = ((uwVStart << 8) | ((uwHStart) >> 1));
-	pHeader->uwRawCtl = (UWORD) (
-		(uwVStop << 8) |
-		(isAttached << 7) |
-		(BTST(uwVStart, 8) << 2) |
-		(BTST(uwVStop, 8) << 1) |
-		BTST(uwHStart, 0)
-	);
+	{
+		UWORD uwRawPos = (UWORD)((uwVStart << 8) | ((uwHStart) >> 1));
+		UWORD uwRawCtl = (UWORD)(
+			(uwVStop << 8) |
+			(isAttached << 7) |
+			(BTST(uwVStart, 8) << 2) |
+			(BTST(uwVStop, 8) << 1) |
+			BTST(uwHStart, 0)
+		);
+#ifdef ACE_HOST
+		/* Chip RAM is big-endian, matching sprite DMA reads. */
+		UBYTE *pRaw = (UBYTE *)pHeader;
+		pRaw[0] = (UBYTE)(uwRawPos >> 8);
+		pRaw[1] = (UBYTE)uwRawPos;
+		pRaw[2] = (UBYTE)(uwRawCtl >> 8);
+		pRaw[3] = (UBYTE)uwRawCtl;
+#else
+		pHeader->uwRawPos = uwRawPos;
+		pHeader->uwRawCtl = uwRawCtl;
+#endif
+	}
 
 }
 

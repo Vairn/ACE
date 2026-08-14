@@ -144,14 +144,9 @@ static void sendKey(UBYTE code, int down) {
 
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 static int isVirtualJoyKey(SDL_Scancode sc) {
-	return sc == SDL_SCANCODE_W || sc == SDL_SCANCODE_A ||
-		sc == SDL_SCANCODE_S || sc == SDL_SCANCODE_D ||
-		sc == SDL_SCANCODE_KP_8 || sc == SDL_SCANCODE_KP_2 ||
+	return sc == SDL_SCANCODE_KP_8 || sc == SDL_SCANCODE_KP_2 ||
 		sc == SDL_SCANCODE_KP_4 || sc == SDL_SCANCODE_KP_6 ||
-		sc == SDL_SCANCODE_KP_0 || sc == SDL_SCANCODE_Z ||
-		sc == SDL_SCANCODE_X || sc == SDL_SCANCODE_LCTRL ||
-		sc == SDL_SCANCODE_RCTRL || sc == SDL_SCANCODE_LALT ||
-		sc == SDL_SCANCODE_RALT;
+		sc == SDL_SCANCODE_KP_5 || sc == SDL_SCANCODE_RCTRL;
 }
 
 /* Amiga JOYxDAT: up = bit8 XOR bit9, down = bit0 XOR bit1, left = bit9, right = bit1. */
@@ -279,6 +274,10 @@ void aceHostSdlInit(int isPal) {
 #ifdef SDL_HINT_WINDOWS_DPI_SCALING
 		SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "0");
 #endif
+		/* Nearest-neighbor must be set before the renderer/texture exist. Linear
+		 * (or a non-integer stretch of 640x256 into a 4:3 window) turns lores
+		 * text and edges into a vertical comb / screen-door. */
+		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 		if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 			| SDL_INIT_GAMECONTROLLER
@@ -301,25 +300,37 @@ void aceHostSdlInit(int isPal) {
 		if(!s_ren) {
 			s_ren = SDL_CreateRenderer(s_win, -1, 0);
 		}
-		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 		s_tex = SDL_CreateTexture(
 			s_ren, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STREAMING,
 			ACE_HOST_FB_WIDTH, h
 		);
+#if SDL_VERSION_ATLEAST(2, 0, 12)
+		if(s_tex) {
+			SDL_SetTextureScaleMode(s_tex, SDL_ScaleModeNearest);
+		}
+#endif
 		memset(&want, 0, sizeof(want));
 		want.freq = 44100;
 		want.format = AUDIO_S16SYS;
 		want.channels = 2;
 		want.samples = 1024;
 		want.callback = audioCb;
-		s_audio = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+		s_audio = SDL_OpenAudioDevice(
+			NULL, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE
+		);
 		if(s_audio) {
+			paulaSetOutputRate(have.freq);
 			SDL_PauseAudioDevice(s_audio, 0);
+			fprintf(stderr, "[ACE_HOST] audio %d Hz S16 stereo, vblank sync %u Hz\n",
+				have.freq, isPal ? 50u : 60u);
+		}
+		else {
+			fprintf(stderr, "[ACE_HOST] SDL_OpenAudioDevice: %s\n", SDL_GetError());
 		}
 		SDL_SetRelativeMouseMode(SDL_TRUE);
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 		openFirstPad();
-		fprintf(stderr, "[ACE_HOST] virtual joystick ON (WASD/numpad/gamepad → JOY1DAT)\n");
+		fprintf(stderr, "[ACE_HOST] virtual joystick ON (numpad 8462, fire 5/RCtrl → JOY1DAT)\n");
 #endif
 		s_paceFreq = SDL_GetPerformanceFrequency();
 		if(!s_paceFreq) {
@@ -424,13 +435,12 @@ void aceHostSdlApplyInput(void) {
 	s_pot = 0xFFFF;
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 	{
-		int up = ks[SDL_SCANCODE_W] || ks[SDL_SCANCODE_KP_8];
-		int down = ks[SDL_SCANCODE_S] || ks[SDL_SCANCODE_KP_2];
-		int left = ks[SDL_SCANCODE_A] || ks[SDL_SCANCODE_KP_4];
-		int right = ks[SDL_SCANCODE_D] || ks[SDL_SCANCODE_KP_6];
-		int fire = ks[SDL_SCANCODE_LCTRL] || ks[SDL_SCANCODE_RCTRL] ||
-			ks[SDL_SCANCODE_Z] || ks[SDL_SCANCODE_KP_0];
-		int fire2 = ks[SDL_SCANCODE_LALT] || ks[SDL_SCANCODE_X];
+		int up = ks[SDL_SCANCODE_KP_8];
+		int down = ks[SDL_SCANCODE_KP_2];
+		int left = ks[SDL_SCANCODE_KP_4];
+		int right = ks[SDL_SCANCODE_KP_6];
+		int fire = ks[SDL_SCANCODE_KP_5] || ks[SDL_SCANCODE_RCTRL];
+		int fire2 = 0;
 		if(s_pad) {
 			up |= SDL_GameControllerGetButton(s_pad, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
 				(SDL_GameControllerGetAxis(s_pad, SDL_CONTROLLER_AXIS_LEFTY) < -8000);
@@ -514,6 +524,11 @@ void aceHostSdlPresent(const UWORD *pFb, int width, int height) {
 #ifdef ACE_HOST_HAS_SDL
 	SDL_Rect dst;
 	int rw, rh;
+	/* 4:3 CRT unit: 640x480. Integer multiples keep lores columns 1:1 or 2:1
+	 * instead of 1.6x/2.5x nearest-neighbor combing on DPI or resized windows. */
+	const int unitW = ACE_HOST_FB_WIDTH;
+	const int unitH = ACE_HOST_FB_WIDTH * 3 / 4;
+	int scale;
 	if(s_headless || !s_ren || !s_tex) {
 		return;
 	}
@@ -525,17 +540,38 @@ void aceHostSdlPresent(const UWORD *pFb, int width, int height) {
 #endif
 	SDL_UpdateTexture(s_tex, NULL, s_presentTmp, width * (int)sizeof(UWORD));
 	SDL_GetRendererOutputSize(s_ren, &rw, &rh);
-	if(rw * 3 >= rh * 4) {
-		dst.h = rh;
-		dst.w = rh * 4 / 3;
-		dst.x = (rw - dst.w) / 2;
-		dst.y = 0;
+	scale = rw / unitW;
+	if(rh / unitH < scale) {
+		scale = rh / unitH;
+	}
+	if(scale < 1) {
+		if(rw * 3 >= rh * 4) {
+			dst.h = rh;
+			dst.w = rh * 4 / 3;
+			dst.x = (rw - dst.w) / 2;
+			dst.y = 0;
+		}
+		else {
+			dst.w = rw;
+			dst.h = rw * 3 / 4;
+			dst.x = 0;
+			dst.y = (rh - dst.h) / 2;
+		}
 	}
 	else {
-		dst.w = rw;
-		dst.h = rw * 3 / 4;
-		dst.x = 0;
+		dst.w = unitW * scale;
+		dst.h = unitH * scale;
+		dst.x = (rw - dst.w) / 2;
 		dst.y = (rh - dst.h) / 2;
+	}
+	if(s_vbl == 0) {
+		int ww = 0, wh = 0;
+		if(s_win) {
+			SDL_GetWindowSize(s_win, &ww, &wh);
+		}
+		fprintf(stderr,
+			"[ACE_HOST] present window=%dx%d renderer=%dx%d dest=%dx%d integer=%d\n",
+			ww, wh, rw, rh, dst.w, dst.h, scale);
 	}
 	SDL_SetRenderDrawColor(s_ren, 0, 0, 0, 255);
 	SDL_RenderClear(s_ren);
@@ -551,6 +587,38 @@ void aceHostSdlPresent(const UWORD *pFb, int width, int height) {
 void aceHostOnVblank(void) {
 	int w, h;
 	UWORD *fb = chipsetFramebuffer(&w, &h);
+	{
+		const char *szDump = getenv("ACE_HOST_DUMP_FB");
+		if(szDump && szDump[0] && s_vbl + 1 == atoi(szDump)) {
+			int y, x, y0 = -1;
+			FILE *p;
+			for(y = 0; y < h && y0 < 0; ++y) {
+				for(x = 0; x < w; ++x) {
+					if(fb[y * w + x]) {
+						y0 = y;
+						break;
+					}
+				}
+			}
+			fprintf(stderr, "[ACE_HOST] fb first lit row %d (%dx%d)\n", y0, w, h);
+			p = fopen("host_fb.ppm", "wb");
+			if(p) {
+				fprintf(p, "P6\n%d %d\n255\n", w, h);
+				for(y = 0; y < h; ++y) {
+					for(x = 0; x < w; ++x) {
+						UWORD p565 = fb[y * w + x];
+						unsigned char rgb[3] = {
+							(unsigned char)(((p565 >> 11) & 0x1F) * 255 / 31),
+							(unsigned char)(((p565 >> 5) & 0x3F) * 255 / 63),
+							(unsigned char)((p565 & 0x1F) * 255 / 31)
+						};
+						fwrite(rgb, 1, 3, p);
+					}
+				}
+				fclose(p);
+			}
+		}
+	}
 	if(!s_headless) {
 		aceHostSdlPump();
 		aceHostSdlApplyInput();
@@ -572,6 +640,9 @@ void aceHostOnVblank(void) {
 	if(s_quitAfter > 0 && s_vbl >= s_quitAfter) {
 		fprintf(stderr, "[ACE_HOST] quit after %d vblanks\n", s_vbl);
 		gameExit();
+		s_quit = 1;
+		/* Games may use a custom main-loop condition that ignores gameIsRunning(). */
+		exit(0);
 	}
 }
 

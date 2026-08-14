@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <cmath>
+#include <limits>
 #include <memory>
 #include "common/bitmap.h"
 #include "common/logging.h"
@@ -56,7 +58,7 @@ void printUsage(const std::string &szAppName)
 	print("Usage:\n\t{} in.png out.png [transforms]\n", szAppName);
 	print("\nAvailable transforms, done in passed order:\n");
 	print("\t-extract x y width height\tExtract rectangle at x,y of size width*height.\n");
-	print("\t-rotate deg bgcolor cx cy\tRotate clockwise by given number of degrees around cx,cy. Values can be floats/negative.\n");
+	print("\t-rotate deg bgcolor [cx cy]\tRotate clockwise by given number of degrees. cx,cy default to image center. Values can be floats/negative.\n");
 	print("\t-mirror x|y              \tMirror image along x or y axis.\n");
 	print("\nCurrently only PNG is supported, sorry!\n");
 }
@@ -108,7 +110,7 @@ int main(int lArgCount, char *pArgs[])
 			}
 		}
 		else if(szOp == "-rotate") {
-			if(ArgIndex + 4 >= lArgCount) {
+			if(ArgIndex + 2 >= lArgCount) {
 				nLog::error(
 					"Too few args for {} - first arg at pos {}, arg count: {}",
 					szOp, ArgIndex + 1, lArgCount
@@ -118,8 +120,16 @@ int main(int lArgCount, char *pArgs[])
 			try {
 				auto Deg = std::stod(pArgs[++ArgIndex]);
 				auto Bg = tRgb(pArgs[++ArgIndex]);
-				auto CenterX = std::stod(pArgs[++ArgIndex]);
-				auto CenterY = std::stod(pArgs[++ArgIndex]);
+				// cx,cy are optional; NaN means "use source image center".
+				double CenterX = std::numeric_limits<double>::quiet_NaN();
+				double CenterY = std::numeric_limits<double>::quiet_NaN();
+				if(ArgIndex + 2 < lArgCount) {
+					const char *szNext = pArgs[ArgIndex + 1];
+					if(szNext[0] != '-' || (szNext[1] >= '0' && szNext[1] <= '9') || szNext[1] == '.') {
+						CenterX = std::stod(pArgs[++ArgIndex]);
+						CenterY = std::stod(pArgs[++ArgIndex]);
+					}
+				}
 				vOps.push_back(std::make_unique<tOpRotate>(Deg, Bg, CenterX, CenterY));
 			}
 			catch(std::exception Ex) {
@@ -241,6 +251,8 @@ tOpRotate::tOpRotate(
 
 tChunkyBitmap tOpRotate::execute(const tChunkyBitmap &Source) {
 	tChunkyBitmap Dst(Source.m_uwWidth, Source.m_uwHeight);
+	double dCenterX = std::isnan(m_dCenterX) ? (Source.m_uwWidth / 2.0) : m_dCenterX;
+	double dCenterY = std::isnan(m_dCenterY) ? (Source.m_uwHeight / 2.0) : m_dCenterY;
 
 	auto Rad = (m_dDeg * 2 * M_PI) / 360;
 	auto CalcCos = cos(Rad);
@@ -248,11 +260,11 @@ tChunkyBitmap tOpRotate::execute(const tChunkyBitmap &Source) {
 
 	// For each of new bitmap's pixel sample color from rotated source x,y
 	for(auto Y = 0; Y < Dst.m_uwHeight; ++Y) {
-		auto Dy = Y - m_dCenterY;
+		auto Dy = Y - dCenterY;
 		for(auto X = 0; X < Dst.m_uwWidth; ++X) {
-			auto Dx = X - m_dCenterX;
-			auto U = uint16_t(round(CalcCos * Dx + CalcSin * Dy + (m_dCenterX)));
-			auto V = uint16_t(round(-CalcSin * Dx + CalcCos * Dy + (m_dCenterY)));
+			auto Dx = X - dCenterX;
+			auto U = uint16_t(round(CalcCos * Dx + CalcSin * Dy + dCenterX));
+			auto V = uint16_t(round(-CalcSin * Dx + CalcCos * Dy + dCenterY));
 
 			if(U < 0 || V < 0 || U >= Dst.m_uwWidth || V >= Dst.m_uwHeight) {
 				// fmt::print("can't sample for {:2d},{:2d} from {:.1f},{:.1f}\n", X, Y, U, V);

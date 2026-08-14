@@ -35,6 +35,7 @@ void paulaDmaSlot(int ch);
 void paulaMix(short *pOut, int nFrames);
 void paulaOnDmaEnable(UWORD uwOld, UWORD uwNew);
 void paulaLineTick(int lineRate, ULONG paulaClock);
+void paulaSetOutputRate(int hz);
 
 void aceHostDispatchInts(UWORD uwPending);
 void aceHostFireCia(UBYTE ubCia, UBYTE ubBit);

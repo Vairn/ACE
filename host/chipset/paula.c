@@ -3,8 +3,10 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-#define PAULA_RATE 28867 /* PAL Paula mix rate ~ CCK/123 */
-#define RING 8192
+/* Mix at the SDL device rate (set by paulaSetOutputRate). 28867 Hz was the
+ * Paula DMA ceiling, not the host output rate — the ring underran every frame. */
+#define RING 16384
+#define VOL_SCALE 4 /* 8-bit * vol(0..64) * 4 → near 16-bit, two chans still sat */
 
 typedef struct tChan {
 	ULONG ptr;
@@ -27,11 +29,16 @@ typedef struct tChan {
 static tChan s_ch[4];
 static int16_t s_ringL[RING];
 static int16_t s_ringR[RING];
-static unsigned s_rHead, s_rTail;
+static volatile unsigned s_rHead, s_rTail;
 static int s_mixAcc;
+static int s_outRate = 44100;
 
 static ULONG ptrOf(APTR a) {
-	return (ULONG)a ? (ULONG)(uintptr_t)aceHostBusToPtr((ULONG)a) : 0;
+	ULONG p = (ULONG)a;
+	if(!p || !aceHostIsChipAddr(p)) {
+		return 0;
+	}
+	return (ULONG)(uintptr_t)aceHostBusToPtr(p);
 }
 
 static UWORD readBe16(ULONG p) {
@@ -43,6 +50,10 @@ static UWORD readBe16(ULONG p) {
 	return (UWORD)((b[0] << 8) | b[1]);
 }
 
+static ULONG lenWords(UWORD uwLen) {
+	return uwLen ? (ULONG)uwLen : 65536u;
+}
+
 void paulaInit(void) {
 	memset(s_ch, 0, sizeof(s_ch));
 	s_rHead = s_rTail = 0;
@@ -52,16 +63,27 @@ void paulaInit(void) {
 void paulaShutdown(void) {
 }
 
+void paulaSetOutputRate(int hz) {
+	if(hz > 0) {
+		s_outRate = hz;
+	}
+}
+
 void paulaOnDmaEnable(UWORD uwOld, UWORD uwNew) {
 	int i;
+	if(!(uwNew & DMAF_MASTER)) {
+		uwNew &= (UWORD)~0x03FF;
+	}
+	if(!(uwOld & DMAF_MASTER)) {
+		uwOld &= (UWORD)~0x03FF;
+	}
 	for(i = 0; i < 4; ++i) {
 		UWORD bit = (UWORD)(DMAF_AUD0 << i);
 		if((uwNew & bit) && !(uwOld & bit)) {
-			s_ch[i].dmaDelay = 1;
+			s_ch[i].dmaDelay = 2;
 			s_ch[i].start = ptrOf(g_pHostCustom->aud[i].ac_ptr);
 			s_ch[i].ptr = s_ch[i].start;
-			s_ch[i].len = g_pHostCustom->aud[i].ac_len ?
-				g_pHostCustom->aud[i].ac_len : 65536u;
+			s_ch[i].len = lenWords(g_pHostCustom->aud[i].ac_len);
 			s_ch[i].remain = s_ch[i].len;
 			s_ch[i].per = g_pHostCustom->aud[i].ac_per;
 			s_ch[i].vol = g_pHostCustom->aud[i].ac_vol;
@@ -74,6 +96,9 @@ void paulaOnDmaEnable(UWORD uwOld, UWORD uwNew) {
 		}
 		if(!(uwNew & bit)) {
 			s_ch[i].on = 0;
+			s_ch[i].hasCurrent = 0;
+			s_ch[i].hasNext = 0;
+			s_ch[i].needFetch = 0;
 		}
 	}
 }
@@ -81,13 +106,13 @@ void paulaOnDmaEnable(UWORD uwOld, UWORD uwNew) {
 void paulaDmaSlot(int ch) {
 	tChan *p = &s_ch[ch];
 	UWORD word;
+	p->per = g_pHostCustom->aud[ch].ac_per;
+	p->vol = g_pHostCustom->aud[ch].ac_vol;
 	if(!p->on) {
 		return;
 	}
-	p->per = g_pHostCustom->aud[ch].ac_per;
-	p->vol = g_pHostCustom->aud[ch].ac_vol;
 	if(p->dmaDelay) {
-		p->dmaDelay = 0;
+		p->dmaDelay--;
 		return;
 	}
 	if(!p->needFetch) {
@@ -95,11 +120,10 @@ void paulaDmaSlot(int ch) {
 	}
 	if(p->remain == 0) {
 		p->start = ptrOf(g_pHostCustom->aud[ch].ac_ptr);
-		p->len = g_pHostCustom->aud[ch].ac_len ?
-			g_pHostCustom->aud[ch].ac_len : 65536u;
+		p->len = lenWords(g_pHostCustom->aud[ch].ac_len);
 		p->ptr = p->start;
 		p->remain = p->len;
-		/* Sample DMA finished — ptplayer isChannelDone() polls this bit. */
+		/* Sample DMA finished — ptplayer one-shots disable the channel here. */
 		chipsetRaiseInt((UWORD)(INTF_AUD0 << ch));
 	}
 	if(!p->remain) {
@@ -111,7 +135,6 @@ void paulaDmaSlot(int ch) {
 		p->samp[1] = (int16_t)(int8_t)(word & 0xFF);
 		p->sampIdx = 0;
 		p->hasCurrent = 1;
-		/* Paula has a second word buffer; request it at the next DMA slot. */
 		p->needFetch = 1;
 	}
 	else {
@@ -125,23 +148,24 @@ void paulaDmaSlot(int ch) {
 }
 
 static void pushSample(int16_t l, int16_t r) {
-	unsigned next = (s_rHead + 1) % RING;
+	unsigned head = s_rHead;
+	unsigned next = (head + 1u) % RING;
 	if(next == s_rTail) {
 		return;
 	}
-	s_ringL[s_rHead] = l;
-	s_ringR[s_rHead] = r;
+	s_ringL[head] = l;
+	s_ringR[head] = r;
 	s_rHead = next;
 }
 
 static int chanSample(int i) {
-	int v = s_ch[i].vol > 64 ? 64 : (int)s_ch[i].vol;
-	int s;
-	if(!s_ch[i].hasCurrent) {
+	int v, s;
+	if(!s_ch[i].on || !s_ch[i].hasCurrent) {
 		return 0;
 	}
+	v = s_ch[i].vol > 64 ? 64 : (int)s_ch[i].vol;
 	s = s_ch[i].samp[s_ch[i].sampIdx & 1];
-	return s * v;
+	return s * v * VOL_SCALE;
 }
 
 static int sat16(int v) {
@@ -158,17 +182,14 @@ void paulaMix(short *pOut, int nFrames) {
 	int f;
 	for(f = 0; f < nFrames; ++f) {
 		int l = 0, r = 0;
-		if(s_rTail != s_rHead) {
-			l = s_ringL[s_rTail];
-			r = s_ringR[s_rTail];
-			s_rTail = (s_rTail + 1) % RING;
+		unsigned tail = s_rTail;
+		if(tail != s_rHead) {
+			l = s_ringL[tail];
+			r = s_ringR[tail];
+			s_rTail = (tail + 1u) % RING;
 		}
-		else {
-			l = chanSample(1) + chanSample(2);
-			r = chanSample(0) + chanSample(3);
-		}
-		pOut[f * 2] = (short)sat16(l);
-		pOut[f * 2 + 1] = (short)sat16(r);
+		pOut[f * 2] = (short)l;
+		pOut[f * 2 + 1] = (short)r;
 	}
 }
 
@@ -177,7 +198,7 @@ static void advanceChannel(tChan *p, ULONG paulaClock) {
 	if(!p->on || !p->per) {
 		return;
 	}
-	threshold = (uint64_t)p->per * PAULA_RATE;
+	threshold = (uint64_t)p->per * (uint64_t)s_outRate;
 	p->periodPhase += paulaClock;
 	while(p->periodPhase >= threshold) {
 		p->periodPhase -= threshold;
@@ -205,15 +226,20 @@ static void advanceChannel(tChan *p, ULONG paulaClock) {
 void paulaLineTick(int lineRate, ULONG paulaClock) {
 	int s, n;
 	int i;
-	if(lineRate <= 0) {
+	if(lineRate <= 0 || s_outRate <= 0) {
 		return;
 	}
-	s_mixAcc += PAULA_RATE;
+	s_mixAcc += s_outRate;
 	n = s_mixAcc / lineRate;
 	s_mixAcc %= lineRate;
 	for(s = 0; s < n; ++s) {
-		int l = chanSample(1) + chanSample(2);
-		int r = chanSample(0) + chanSample(3);
+		int l, r;
+		for(i = 0; i < 4; ++i) {
+			s_ch[i].per = g_pHostCustom->aud[i].ac_per;
+			s_ch[i].vol = g_pHostCustom->aud[i].ac_vol;
+		}
+		l = chanSample(1) + chanSample(2);
+		r = chanSample(0) + chanSample(3);
 		for(i = 0; i < 4; ++i) {
 			advanceChannel(&s_ch[i], paulaClock);
 		}

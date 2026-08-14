@@ -185,6 +185,21 @@ if(ACE_HOST)
 		target_compile_definitions(${TARGET_NAME} PUBLIC ACE_HOST_USE_VIRTUAL_JOYSTICK)
 	endif()
 
+	if(NOT DEFINED ACE_HOST_MIXER_SW_CHANNELS)
+		set(ACE_HOST_MIXER_SW_CHANNELS 3)
+	endif()
+	if(NOT DEFINED ACE_HOST_MIXER_PERIOD)
+		set(ACE_HOST_MIXER_PERIOD 161)
+	endif()
+	if(NOT DEFINED ACE_HOST_MIXER_HW)
+		set(ACE_HOST_MIXER_HW 8) # DMAF_AUD3
+	endif()
+	target_compile_definitions(${TARGET_NAME} PUBLIC
+		ACE_HOST_MIXER_SW_CHANNELS=${ACE_HOST_MIXER_SW_CHANNELS}
+		ACE_HOST_MIXER_PERIOD=${ACE_HOST_MIXER_PERIOD}
+		ACE_HOST_MIXER_HW=${ACE_HOST_MIXER_HW}
+	)
+
 	target_sources(${TARGET_NAME} PRIVATE
 		host/chipset/host_os.c
 		host/chipset/memory.c
@@ -197,6 +212,7 @@ if(ACE_HOST)
 		host/sdl/sdl_host.c
 		host/debug/hud.c
 		host/debug/crash.c
+		host/mixer/mixer.c
 	)
 	target_include_directories(${TARGET_NAME} PUBLIC
 		${PROJECT_SOURCE_DIR}/host/include

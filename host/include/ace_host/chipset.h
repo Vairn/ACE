@@ -98,6 +98,7 @@ int chipsetBlitIsBusy(void);
 int chipsetBlitBusyPeek(void);
 void chipsetRunUntilVpos(UWORD uwY, int isExact);
 void chipsetRunUntilVposGe(UWORD uwY);
+void chipsetWaitVblank(void);
 
 UWORD chipsetVpos(void);
 UWORD chipsetHpos(void);
