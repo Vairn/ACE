@@ -12,6 +12,7 @@
 #include <ace/managers/system.h>
 #include <ace/managers/viewport/simplebuffer.h>
 #include <ace/generic/screen.h>
+#include <stdio.h>
 #include "game.h"
 
 #define COLOR_PRESSED_NEVER 4
@@ -121,6 +122,46 @@ static void showParallelStatus(void) {
 	fontDrawStr(s_pFont, s_pTestInputBfr->pBack, 160, 256, szMsg, 3, FONT_BOTTOM|FONT_HCENTER, s_pTextBitMap);
 }
 
+/* Live held keys via keyCheck(), not ubLastKey (that stays set after release). */
+static void showKeyboard(void) {
+	char szMsg[48];
+	char szKeys[28];
+	UBYTE ubKey;
+	UBYTE ubN = 0;
+
+	szKeys[0] = '\0';
+	for(ubKey = 0; ubKey < KEY_COUNT; ++ubKey) {
+		char ch;
+		if(!keyCheck(ubKey)) {
+			continue;
+		}
+		if(ubN && ubN < sizeof(szKeys) - 2) {
+			szKeys[ubN++] = ' ';
+		}
+		ch = (char)g_pToAscii[ubKey];
+		if(ch >= 32 && ch < 127 && ubN < sizeof(szKeys) - 1) {
+			szKeys[ubN++] = ch;
+		}
+		else if(ubN + 2 < sizeof(szKeys) - 1) {
+			static const char szHex[] = "0123456789ABCDEF";
+			szKeys[ubN++] = szHex[ubKey >> 4];
+			szKeys[ubN++] = szHex[ubKey & 0xF];
+		}
+		szKeys[ubN] = '\0';
+		if(ubN >= sizeof(szKeys) - 4) {
+			break;
+		}
+	}
+	if(!ubN) {
+		sprintf(szMsg, "Keyboard: -");
+	}
+	else {
+		sprintf(szMsg, "Keyboard: %s", szKeys);
+	}
+	blitRect(s_pTestInputBfr->pBack, 0, 176, 320, s_pFont->uwHeight, 0);
+	fontDrawStr(s_pFont, s_pTestInputBfr->pBack, 0, 176, szMsg, 1, 0, s_pTextBitMap);
+}
+
 void gsTestInputCreate(void) {
 	// Prepare view & viewport
 	s_pTestInputView = viewCreate(0, TAG_DONE);
@@ -168,7 +209,7 @@ void gsTestInputCreate(void) {
 
 	fontDrawStr(s_pFont, s_pTestInputBfr->pBack, 0, 160, "TODO Mouse 1", 1, 0, s_pTextBitMap);
 	fontDrawStr(s_pFont, s_pTestInputBfr->pBack, 0, 168, "TODO Mouse 2", 1, 0, s_pTextBitMap);
-	fontDrawStr(s_pFont, s_pTestInputBfr->pBack, 0, 176, "TODO Keyboard", 1, 0, s_pTextBitMap);
+	showKeyboard();
 	showParallelStatus();
 
 	// Display view with its viewports
@@ -196,6 +237,7 @@ void gsTestInputLoop(void) {
 	updateJoyState(1);
 	updateJoyState(2);
 	updateJoyState(3);
+	showKeyboard();
 
 	vPortWaitForEnd(s_pTestInputVPort);
 }

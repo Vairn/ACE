@@ -44,7 +44,10 @@ static void audioCb(void *ud, Uint8 *stream, int len) {
 	paulaMix((short *)stream, len / 4);
 }
 
+#define KEY_UNMAPPED 0xFF
+
 static void initKeyMap(UBYTE *m) {
+	memset(m, KEY_UNMAPPED, 512);
 	m[SDL_SCANCODE_GRAVE] = KEY_ACCENT;
 	m[SDL_SCANCODE_1] = KEY_1;
 	m[SDL_SCANCODE_2] = KEY_2;
@@ -128,18 +131,61 @@ static UBYTE amiKey(SDL_Scancode sc) {
 	if((unsigned)sc < 512) {
 		return map[sc];
 	}
-	return 0;
+	return KEY_UNMAPPED;
 }
 
 static void sendKey(UBYTE code, int down) {
 	UBYTE raw = code;
-	if(!code) {
+	if(code == KEY_UNMAPPED) {
 		return;
 	}
 	if(!down) {
 		raw |= 0x80;
 	}
 	chipsetInjectKey(raw);
+}
+
+#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
+static int isVirtualJoyKey(SDL_Scancode sc);
+#endif
+
+/* Edge-detect SDL's live matrix so ACE pStates follow currently held keys,
+ * not only the last KEYDOWN (ubLastKey / a missed KEYUP). */
+static void syncKeysFromSdl(void) {
+	const Uint8 *ks = SDL_GetKeyboardState(NULL);
+	static UBYTE s_prevDown[KEY_COUNT];
+	UBYTE down[KEY_COUNT];
+	int sc;
+	UBYTE i;
+
+	memset(down, 0, sizeof(down));
+	for(sc = 0; sc < SDL_NUM_SCANCODES; ++sc) {
+		UBYTE ami;
+		if(!ks[sc]) {
+			continue;
+		}
+		if(sc == SDL_SCANCODE_F10 || sc == SDL_SCANCODE_F11 || sc == SDL_SCANCODE_F12) {
+			continue;
+		}
+#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
+		if(isVirtualJoyKey((SDL_Scancode)sc)) {
+			continue;
+		}
+#endif
+		ami = amiKey((SDL_Scancode)sc);
+		if(ami < KEY_COUNT) {
+			down[ami] = 1;
+		}
+	}
+	for(i = 0; i < KEY_COUNT; ++i) {
+		if(down[i] && !s_prevDown[i]) {
+			sendKey(i, 1);
+		}
+		else if(!down[i] && s_prevDown[i]) {
+			sendKey(i, 0);
+		}
+	}
+	memcpy(s_prevDown, down, sizeof(s_prevDown));
 }
 
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
@@ -407,14 +453,7 @@ void aceHostSdlPump(void) {
 				fprintf(stderr, "[ACE_HOST] timing log %s\n",
 					chipsetTimingLogEnabled() ? "on" : "off");
 			}
-			else {
-#ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
-				if(isVirtualJoyKey(e.key.keysym.scancode)) {
-					continue;
-				}
-#endif
-				sendKey(amiKey(e.key.keysym.scancode), down);
-			}
+			/* Amiga keys come from SDL_GetKeyboardState in aceHostSdlApplyInput. */
 		}
 	}
 	if(s_quit) {
@@ -428,7 +467,9 @@ void aceHostSdlApplyInput(void) {
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 	const Uint8 *ks = SDL_GetKeyboardState(NULL);
 #endif
-	int m1 = SDL_GetMouseState(NULL, NULL);
+	int m1;
+	syncKeysFromSdl();
+	m1 = SDL_GetMouseState(NULL, NULL);
 	s_joy0 = (UWORD)(((UWORD)s_mouseY << 8) | s_mouseX);
 	s_joy1 = 0;
 	s_fireMask = 0;
