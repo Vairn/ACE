@@ -261,7 +261,7 @@ void viewLoad(tView *pView) {
 		g_pCustom->fmode = 0;   // AGA fix
 		g_pCustom->bplcon3 = 0; // AGA fix
 		/* ESPRM/OSPRM = 1 (OCS sprite colors 16–31); BPLAM XOR = 0 */
-		g_pCustom->bplcon4 = 0x1100;
+		g_pCustom->bplcon4 = 0x0011;
 #ifdef ACE_USE_AGA_FEATURES
 		for(UBYTE i = 0; i < 8; ++i) {
 			g_pCustom->bplpt[i] = 0;
@@ -298,7 +298,7 @@ void viewLoad(tView *pView) {
 		g_pCustom->bplcon2 = viewBuildBplCon2(pView);
 		g_pCustom->bplcon3 = 0; // AGA fix
 		/* ESPRM/OSPRM = 1 (OCS sprite colors 16–31); BPLAM XOR = 0 */
-		g_pCustom->bplcon4 = 0x1100;
+		g_pCustom->bplcon4 = 0x0011;
 #ifdef ACE_USE_AGA_FEATURES
 		if(pView->pFirstVPort->eFlags & VP_FLAG_AGA) {
 			g_pCustom->fmode = pView->pFirstVPort->ubFmode;

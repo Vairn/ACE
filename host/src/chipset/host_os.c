@@ -34,19 +34,34 @@ typedef struct tOsDir {
 
 void *hostOsMapLow(size_t size) {
 #ifdef _WIN32
-	void *p = VirtualAlloc(
-		(LPVOID)(uintptr_t)0x20000000, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE
-	);
-	if(p) {
-		return p;
+	/* Amiga ULONG pointers must land below 4GB. The first mapping (16MiB bus)
+	 * usually takes 0x20000000; a second VirtualAlloc(NULL) on 64-bit Windows
+	 * is almost always above 4GB. Walk the low 2GB in 16MiB steps instead. */
+	uintptr_t hint;
+	for(hint = 0x20000000u; hint < 0x80000000u; hint += 0x01000000u) {
+		void *p = VirtualAlloc(
+			(LPVOID)hint, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE
+		);
+		if(p) {
+			if((uintptr_t)p <= (uintptr_t)0xFFFFFFFFULL - size) {
+				return p;
+			}
+			VirtualFree(p, 0, MEM_RELEASE);
+		}
 	}
-	p = VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-	if(p && (uintptr_t)p > (uintptr_t)0xFFFFFFFFULL - size) {
-		fprintf(stderr, "[ACE_HOST] ERR: mapping %p is above 4GB\n", p);
-		VirtualFree(p, 0, MEM_RELEASE);
-		return 0;
+	for(hint = 0x10000000u; hint < 0x20000000u; hint += 0x01000000u) {
+		void *p = VirtualAlloc(
+			(LPVOID)hint, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE
+		);
+		if(p) {
+			if((uintptr_t)p <= (uintptr_t)0xFFFFFFFFULL - size) {
+				return p;
+			}
+			VirtualFree(p, 0, MEM_RELEASE);
+		}
 	}
-	return p;
+	fprintf(stderr, "[ACE_HOST] ERR: could not map %zu bytes below 4GB\n", size);
+	return 0;
 #else
 	void *p = mmap(
 		NULL, size, PROT_READ | PROT_WRITE,

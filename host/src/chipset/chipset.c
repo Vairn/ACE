@@ -734,7 +734,7 @@ static int pixelColor(int pix) {
 		}
 	}
 #ifdef ACE_USE_AGA_FEATURES
-	idx ^= (int)(g_pHostCustom->bplcon4 & 0x00FF);
+	idx ^= (int)((g_pHostCustom->bplcon4 >> 8) & 0x00FF);
 #endif
 	return idx;
 }
@@ -900,8 +900,8 @@ static int spritePixel(int x, int *pColor, int *pPri) {
 		int ch = found - 1;
 #ifdef ACE_USE_AGA_FEATURES
 		int bank = (ch & 1)
-			? ((g_pHostCustom->bplcon4 >> 8) & 0xF)
-			: ((g_pHostCustom->bplcon4 >> 12) & 0xF);
+			? (g_pHostCustom->bplcon4 & 0xF)
+			: ((g_pHostCustom->bplcon4 >> 4) & 0xF);
 		*pColor = bank * 16 + col;
 #else
 		*pColor = 16 + ((ch & ~1) << 1) + col;

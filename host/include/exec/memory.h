@@ -18,6 +18,7 @@ extern "C" {
 #define MEMF_LARGEST       (1L << 17)
 #define MEMF_REVERSE       (1L << 18)
 #define MEMF_TOTAL         (1L << 19)
+#define MEMF_NO_EXPUNGE    (1L << 31)
 
 #ifdef __cplusplus
 }

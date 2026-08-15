@@ -60,18 +60,18 @@ UBYTE spriteDisableInCopRawMode(
 
 #ifdef ACE_USE_AGA_FEATURES
 /**
- * BPLCON4: bits 15-12 ESPRM (even sprites), 11-8 OSPRM (odd sprites),
- * 7-0 BPLAM (playfield XOR). Preserve XOR and the other sprite bank.
+ * BPLCON4: bits 15-8 BPLAM (playfield XOR), 7-4 ESPRM (even sprites),
+ * 3-0 OSPRM (odd sprites). Preserve XOR and the other sprite bank.
  */
 void spriteSetOddColorPaletteBank(UBYTE ubIndex) {
 	UWORD uw = g_pCustom->bplcon4;
 
-	g_pCustom->bplcon4 = (UWORD)((uw & 0xF0FF) | (((UWORD)(ubIndex & 0x0F)) << 8));
+	g_pCustom->bplcon4 = (UWORD)((uw & 0xFFF0) | ((UWORD)(ubIndex & 0x0F)));
 }
 
 void spriteSetEvenColorPaletteBank(UBYTE ubIndex) {
 	UWORD uw = g_pCustom->bplcon4;
 
-	g_pCustom->bplcon4 = (UWORD)((uw & 0x0FFF) | (((UWORD)(ubIndex & 0x0F)) << 12));
+	g_pCustom->bplcon4 = (UWORD)((uw & 0xFF0F) | (((UWORD)(ubIndex & 0x0F)) << 4));
 }
 #endif
