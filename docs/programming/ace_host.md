@@ -208,14 +208,23 @@ touched on the game thread at vblank (`aceHostOnVblank`).
 
 ### Copper
 
-Same ACE copper manager. On host, copper instructions are stored as **big-endian
-bytes** (`copSetWait` / `copSetMove` in `include/ace/managers/copper.h`) so the
-interpreter matches Amiga memory layout. Block sort uses Y then X, not the
-`ulYX` overlay (which is endian-dependent).
+Same ACE copper manager. CHIP copperlists (what the interpreter DMA-reads) are
+**big-endian bytes** (`copSetWait` / `copSetMove` / `copSetMoveVal`). Copper
+**blocks** (`pCmds`) keep native bitfields — including when FAST is 0 and the
+alloc sits in CHIP — so `pCmds[i].sMove.bfValue = color` works as on Amiga.
+`copMove` writes those fields; `copUpdateFromBlocks` serializes them to BE.
+Block sort uses Y then X, not the `ulYX` overlay (endian-dependent).
 
 WAIT compares V/H against the live beam, including the blitter-busy bit unless
 the WAIT ignore-blit flag is set. COPJMP1 at vblank line 0 restarts COP1LC.
 A MOVE to a pointer register stitches 16-bit halves into a 32-bit CHIP address.
+
+OCS WAIT Y is 8-bit. ACE's scrollbuffer Y-break past line 255 is `WAIT $FF,$DF`
+then `WAIT Y=(split&0xFF)` — meaning line 256+Y after the beam wraps. Host
+copper still has leftover slots on line 255, so that second wait would see
+V=255 > Y and fire immediately (a horizontal tear ~40px too high, with the
+wrapped bitplanes shifted). After a Y=255 wait completes, a follow-up wait
+for Y<255 is held until V wraps.
 
 ### Blitter (`host/src/chipset/blitter.c`)
 
@@ -246,8 +255,10 @@ aligned — the Amiga path still warns.
 - AGA: FMODE fetch size, BPLCON3 bank/LOCT colors, BPLCON4 XOR / sprite bank.
 - Eight hardware sprites, attach, chained VSTOP fetch, AGA wide sprites via FMODE.
 
-The window is **4:3 CRT** (640×480 unit, integer scale, nearest-neighbor) so
-lores columns stay 1:1 or 2:1 instead of a screen-door stretch of 640×256.
+The window is **4:3 CRT** by default (640×480 unit, integer scale, nearest-neighbor)
+so lores columns stay 1:1 or 2:1. F11 Video can switch to square pixels or
+stretch-to-fill, and cycle CPU filters (nearest / linear / Scale2x / hq2x / hq3x)
+plus scanlines. Settings persist in `ace_host.ini` next to the executable.
 
 ### Paula and the software mixer
 
@@ -453,7 +464,7 @@ must call it each frame (or `WaitTOF()` / `chipsetWaitVblank()`).
 | `ACE_HOST_MACHINE` | empty → A500_512_512 (or A1200 if AGA) | Memory preset |
 | `ACE_HOST_MEM_MODE` | STRICT | STRICT or VIRTUAL |
 | `ACE_HOST_CHIP_SIZE` / `ACE_HOST_FAST_SIZE` | 0 | CUSTOM machine sizes, bytes |
-| `ACE_HOST_DEBUG` | ON | F11/F12 HUD |
+| `ACE_HOST_DEBUG` | ON | Shift+F11/F12 HUD |
 | `ACE_HOST_USE_VIRTUAL_JOYSTICK` | OFF | Numpad / gamepad → JOY1 |
 | `ACE_HOST_MIXER_SW_CHANNELS` | 3 | Software mixer voices |
 | `ACE_HOST_MIXER_PERIOD` | 161 | Paula period for the mix buffer |
@@ -475,7 +486,7 @@ Set in the shell before launching the exe.
 | `ACE_HOST_QUIT_AFTER=N` | `gameExit()` after N vblanks. |
 | `ACE_HOST_AUTO_KEY` | Inject a key on a given vblank (`return` / `space` / `escape` or a raw code). |
 | `ACE_HOST_AUTO_KEY_FRAME` | Vblank index for that key (default 10). Released two frames later. |
-| `ACE_HOST_TIMING=1` | Log lines/frame, last copper WAIT Y, blit slots every ~50 frames. Also toggled with F10. |
+| `ACE_HOST_TIMING=1` | Log lines/frame, last copper WAIT Y, blit slots every ~50 frames. Also toggled with Shift+F10. |
 | `ACE_HOST_DUMP_FB=N` | Write `host_fb.ppm` on vblank N and print the first lit row. |
 | `ACE_HOST_TEST` | Showcase only: jump straight to a test (`menu`, `blit`, `copper`, … or a numeric index). |
 | `ACE_HOST_ADDR2LINE` | Path to `addr2line` for Windows crash dumps (default MSYS2 UCRT). |
@@ -491,23 +502,49 @@ set ACE_HOST_QUIT_AFTER=200
 
 ### Runtime keys (host overlay)
 
-These are consumed by SDL, not the Amiga keyboard:
+These are consumed by SDL, not the Amiga keyboard. While a menu is open, **no**
+keys are forwarded to the CIA.
 
 | Key | Action |
 | --- | --- |
-| F10 | Toggle timing log to stderr |
-| F11 | Toggle memory HUD (`ACE_HOST_DEBUG`) |
-| F12 | Toggle full overlay: per-slot DMA colors + CHIP map + copper disasm |
+| F11 | Toggle **Video** menu (fullscreen, scale, aspect, filter, scanlines) |
+| F12 | Toggle **Host** menu (vsync, pace, volume, virtual joystick) |
+| Esc | Close the open menu |
+| Alt+Enter | Cycle fullscreen Off → Borderless → Exclusive → Off |
+| Shift+F10 | Toggle timing log to stderr |
+| Shift+F11 | Toggle memory HUD (`ACE_HOST_DEBUG`) |
+| Shift+F12 | Toggle full overlay: per-slot DMA colors + CHIP map + copper disasm |
 | Close window | `systemKill("window closed")` |
 
 Everything else is an Amiga key. Showcase: arrows/WASD move the menu, Return
-selects, Escape goes back.
+selects, Escape goes back (unless a host menu is open).
+
+### `ace_host.ini`
+
+Written beside the executable (`SDL_GetBasePath()` + `ace_host.ini`) when a menu
+row commits and again on shutdown. Missing file uses defaults: windowed, scale 2,
+4:3, nearest, scanlines off, vsync on, pace on, volume 10.
+
+```
+fullscreen=off|borderless|exclusive
+scale=1..4
+aspect=4:3|square|stretch
+filter=nearest|linear|scale2x|hq2x|hq3x
+scanlines=0|1
+vsync=0|1
+pace=0|1
+volume=0..10
+virtual_joy=0|1
+```
+
+`ACE_HOST_HEADLESS` and `ACE_HOST_NOPACE` still override pace/window for that
+process so CI stays deterministic. PAL vs NTSC is a startup choice (`chipsetInit`);
+there is no runtime switch.
 
 ### Debug HUD
 
-Needs `-DACE_HOST_DEBUG=ON` (the CMake default).
-
-F11 line (abbreviated):
+Needs `-DACE_HOST_DEBUG=ON` (the CMake default). Open with **Shift+F11** (memory)
+and **Shift+F12** (DMA strip + CHIP map + copper).
 
 ```text
 A500_512_512 STRICT
@@ -522,7 +559,7 @@ LN313 CW44 BLIT1200 OK
 - **BLIT** — blitter DMA slots last frame.
 - **OK / BAD** — slot/line counts matched the PAL/NTSC constants.
 
-F12 paints the last scanline’s 227 DMA slots:
+Shift+F12 paints the last scanline’s 227 DMA slots:
 
 | Color | Channel |
 | --- | --- |
@@ -561,9 +598,11 @@ function/file/line.
 | `host/src/chipset/memory.c` | CHIP/FAST pools, `AllocMem` |
 | `host/src/chipset/stdlib_alloc.c` | wrapped `malloc` |
 | `host/src/chipset/host_os.c` | low-4GB map, dirs, OS heap for SDL |
-| `host/src/sdl/sdl_host.c` | Window, present, input, pacing, env vars |
+| `host/src/sdl/sdl_host.c` | Window, present, input, pacing, env vars, filters |
+| `host/src/sdl/settings.c` | F11/F12 menus + `ace_host.ini` |
+| `host/src/sdl/scale2x.c` / `hqx.c` | CPU upscalers |
 | `host/src/mixer/mixer.c` | Software mixer onto one Paula channel |
-| `host/src/debug/hud.c` | F11/F12 overlay |
+| `host/src/debug/hud.c` | Shift+F11/F12 overlay + 5x7 font |
 | `host/src/debug/crash.c` | Windows crash dump |
 | `host/include/` | NDK-shaped headers, `ace_host/`, `chipset_priv.h`, `host_os.h` |
 | `src/ace/utils/custom.c` | Host `g_pCustom` bind, `getRayPos` |

@@ -532,7 +532,16 @@ UBYTE copUpdateFromBlocks(void) {
 
 		// Copy MOVEs
 		for(UWORD i = pBlock->uwCurrCount; i--;) {
+#ifdef ACE_HOST
+			const tCopMoveCmd *pMove = &pBlock->pCmds[i].sMove;
+			copCmdWriteIr(
+				&pBackBfr->pList[uwListPos + i],
+				(UWORD)(pMove->bfDestAddr & 0x1FE),
+				pMove->bfValue
+			);
+#else
 			pBackBfr->pList[uwListPos + i].ulCode = pBlock->pCmds[i].ulCode;
+#endif
 		}
 		uwListPos += pBlock->uwCurrCount;
 	}
@@ -584,7 +593,19 @@ void copBlockWait(tCopList *pCopList, tCopBlock *pBlock, UWORD uwX, UWORD uwY) {
 }
 
 void copMove(tCopList *pCopList, tCopBlock *pBlock, volatile void *pAddr, UWORD uwValue) {
+#ifdef ACE_HOST
+	/* Block pCmds are native bitfields even when FAST is 0 and the alloc
+	 * lands in CHIP. copSetMove writes BE for RAW CHIP lists; merging
+	 * serializes these fields in copUpdateFromBlocks. */
+	tCopMoveCmd *pMove = (tCopMoveCmd *)&pBlock->pCmds[pBlock->uwCurrCount];
+	pMove->bfUnused = 0;
+	pMove->bfDestAddr = (UWORD)(
+		((uintptr_t)pAddr - (uintptr_t)((UBYTE *)g_pCustom)) & 0x1FE
+	);
+	pMove->bfValue = uwValue;
+#else
 	copSetMove((tCopMoveCmd*)&pBlock->pCmds[pBlock->uwCurrCount], pAddr, uwValue);
+#endif
 	++pBlock->uwCurrCount;
 
 	pBlock->ubUpdated = 2;

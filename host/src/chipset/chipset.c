@@ -46,6 +46,11 @@ static int s_copWaiting;
 static int s_copSkip;
 static UWORD s_copWaitIr1;
 static UWORD s_copWaitIr2;
+/* Set when a WAIT for Y=255 completes. ACE's scrollbuffer Y-break past line
+ * 255 is WAIT $FF,$DF then WAIT Y=(split&0xFF). Host copper still has slots
+ * left on that line, so the second wait would see V=255 > Y and fire ~40px
+ * too early. Stall it until V wraps. */
+static int s_copSawWait255;
 
 static UWORD s_fb[ACE_HOST_FB_WIDTH * ACE_HOST_FB_HEIGHT_PAL];
 static UBYTE s_lineDma[ACE_HOST_SLOTS_PER_LINE];
@@ -290,6 +295,14 @@ static void copperJump(ULONG ulLc) {
 	s_copSkip = 0;
 }
 
+static void copperNoteWaitHit(UWORD uwIr1) {
+	s_lastCopWaitY = s_uwVpos;
+	if(s_copWaitHitN < 16) {
+		s_copWaitHits[s_copWaitHitN++] = s_uwVpos;
+	}
+	s_copSawWait255 = ((uwIr1 >> 8) == 0xFF);
+}
+
 static int copperReached(UWORD uwIr1, UWORD uwIr2) {
 	UWORD vmask = (UWORD)(((uwIr2 >> 8) & 0x7F) | 0x80);
 	UWORD hmask = (UWORD)(uwIr2 & 0xFE);
@@ -298,6 +311,11 @@ static int copperReached(UWORD uwIr1, UWORD uwIr2) {
 	UWORD vcmp = (UWORD)((uwIr1 & (uwIr2 | 0x8000u)) >> 8);
 	UWORD hcmp = (UWORD)(uwIr1 & hmask);
 	if(!(uwIr2 & 0x8000) && blitterBusy()) {
+		return 0;
+	}
+	/* After WAIT $FF,$DF the 8-bit V is still 255 for a few CCK. A follow-up
+	 * wait for Y<255 is the PAL wrap (line 256+Y), not "already past". */
+	if(s_copSawWait255 && s_uwVpos == 255 && vcmp < 255 && (vmask & 0x7F) == 0x7F) {
 		return 0;
 	}
 	if(vp < vcmp) {
@@ -327,10 +345,7 @@ static int copperTick(void) {
 	if(s_copWaiting) {
 		if(copperReached(s_copWaitIr1, s_copWaitIr2)) {
 			s_copWaiting = 0;
-			s_lastCopWaitY = s_uwVpos;
-			if(s_copWaitHitN < 16) {
-				s_copWaitHits[s_copWaitHitN++] = s_uwVpos;
-			}
+			copperNoteWaitHit(s_copWaitIr1);
 		}
 		return 0;
 	}
@@ -361,10 +376,7 @@ static int copperTick(void) {
 			s_copWaiting = 1;
 		}
 		else {
-			s_lastCopWaitY = s_uwVpos;
-			if(s_copWaitHitN < 16) {
-				s_copWaitHits[s_copWaitHitN++] = s_uwVpos;
-			}
+			copperNoteWaitHit(s_copWaitIr1);
 		}
 		return 1;
 	}
@@ -974,6 +986,9 @@ static void beginLine(void) {
 	s_bplBusyRemain = 0;
 	s_bplModuloDone = 0;
 	s_copSlotRemain = 0;
+	if(s_uwVpos != 255) {
+		s_copSawWait255 = 0;
+	}
 	if(s_uwVpos == 0) {
 		s_frameCount++;
 		if(s_timingLog && s_linesLastFrame && (s_frameCount % 50u) == 1u) {
@@ -1518,6 +1533,7 @@ void chipsetReset(void) {
 	s_uwIntreq = 0;
 	s_copHalted = 1;
 	s_ulCopPc = 0;
+	s_copSawWait255 = 0;
 	s_cpuDeniedRun = 0;
 	s_slotsThisLine = 0;
 	s_linesThisFrame = 0;

@@ -51,7 +51,9 @@ Amiga cross builds are unchanged: leave ACE_HOST off. Without AMIGA or ACE_HOST,
 
 ## Keys
 
-F10 toggle timing log (also `ACE_HOST_TIMING=1`), F11 memory HUD (needs ACE_HOST_DEBUG), F12 DMA/copper/alloc overlay. Mouse moves JOY0DAT (port 1); LMB/RMB/MMB map to CIA FIR0 / POTINP.
+F11 Video menu (fullscreen Off/Borderless/Exclusive, scale 1–4×, aspect 4:3/square/stretch, filter nearest/linear/Scale2x/hq2x/hq3x, scanlines). F12 Host menu (vsync, 50/60 pace, volume, virtual joystick). Esc closes. Alt+Enter cycles fullscreen. Shift+F10 timing log (also `ACE_HOST_TIMING=1`), Shift+F11 memory HUD (`ACE_HOST_DEBUG`), Shift+F12 DMA/copper/alloc overlay. Settings save to `ace_host.ini` beside the exe.
+
+Mouse moves JOY0DAT (port 1); LMB/RMB/MMB map to CIA FIR0 / POTINP.
 
 With `-DACE_HOST_USE_VIRTUAL_JOYSTICK=ON`: WASD or numpad 8462 drive JOY1DAT; arrows remain keyboard. Plug/unplug a gamepad at any time.
 
