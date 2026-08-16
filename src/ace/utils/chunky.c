@@ -7,6 +7,36 @@
 #include <ace/utils/chunky.h>
 #include <ace/utils/bitmap.h>
 #include <fixmath/fix16.h>
+#include <string.h>
+
+/* Bitplane words are Amiga big-endian (first byte = pixels 0..7). Native
+ * UWORD RMW on LE swaps those bytes, so pixel X appears at X^8. */
+static UBYTE *planeByte(tBitMap *pBm, UBYTE ubPlane, UWORD uwX, UWORD uwY) {
+	return (UBYTE *)pBm->Planes[ubPlane]
+		+ (ULONG)uwY * pBm->BytesPerRow + (uwX >> 3);
+}
+
+static const UBYTE *planeByteConst(
+	const tBitMap *pBm, UBYTE ubPlane, UWORD uwX, UWORD uwY
+) {
+	return (const UBYTE *)pBm->Planes[ubPlane]
+		+ (ULONG)uwY * pBm->BytesPerRow + (uwX >> 3);
+}
+
+static UWORD planeWordGet(
+	const tBitMap *pBm, UBYTE ubPlane, UWORD uwX, UWORD uwY
+) {
+	const UBYTE *p = planeByteConst(pBm, ubPlane, (UWORD)(uwX & ~0xFu), uwY);
+	return (UWORD)((p[0] << 8) | p[1]);
+}
+
+static void planeWordPut(
+	tBitMap *pBm, UBYTE ubPlane, UWORD uwX, UWORD uwY, UWORD uwWord
+) {
+	UBYTE *p = planeByte(pBm, ubPlane, (UWORD)(uwX & ~0xFu), uwY);
+	p[0] = (UBYTE)(uwWord >> 8);
+	p[1] = (UBYTE)uwWord;
+}
 
 void chunkyFromPlanar16(
 	const tBitMap *pBitMap, UWORD uwX, UWORD uwY, UBYTE *pOut
@@ -16,8 +46,7 @@ void chunkyFromPlanar16(
 	memset(pOut, 0, 16*sizeof(*pOut));
 	// From highest to lowest color idx bit
 	for(i = pBitMap->Depth; i--;) {
-		// Obtain WORD from bitplane - 16 pixels
-		uwChunk = ((UWORD*)(pBitMap->Planes[i]))[(pBitMap->BytesPerRow>>1)*uwY + (uwX>>4)];
+		uwChunk = planeWordGet(pBitMap, i, uwX, uwY);
 		uwMask = 0x8000; // Start obtaining pixel values from left
 		for(ubPx = 0; ubPx != 16; ++ubPx) { // Insert read pixel bit to right
 			pOut[ubPx] = (pOut[ubPx] << 1) | ((uwChunk & uwMask) != 0);
@@ -33,30 +62,27 @@ UBYTE chunkyFromPlanar(const tBitMap *pBitMap, UWORD uwX, UWORD uwY) {
 }
 
 void chunkyToPlanar16(const UBYTE *pIn, UWORD uwX, UWORD uwY, tBitMap *pOut) {
-	UWORD uwPlanarBuffer = 0;
-	ULONG ulOffset = uwY * (pOut->BytesPerRow / 2) + (uwX / 16);
 	for(UBYTE ubPlane = 0; ubPlane < pOut->Depth; ++ubPlane) {
+		UWORD uwPlanarBuffer = 0;
 		for(UBYTE ubPixel = 0; ubPixel < 16; ++ubPixel) {
 			uwPlanarBuffer <<= 1;
 			if(pIn[ubPixel] & (1<<ubPlane)) {
 				uwPlanarBuffer |= 1;
 			}
 		}
-		UWORD *pPlane = (UWORD*)(pOut->Planes[ubPlane]);
-		pPlane[ulOffset] = uwPlanarBuffer;
+		planeWordPut(pOut, ubPlane, uwX, uwY, uwPlanarBuffer);
 	}
 }
 
 void chunkyToPlanar(UBYTE ubColor, UWORD uwX, UWORD uwY, tBitMap *pOut) {
-	ULONG ulOffset = uwY * (pOut->BytesPerRow / 2) + (uwX / 16);
-	UWORD uwMask = BV(15) >> (uwX & 0xF);
+	UBYTE ubMask = (UBYTE)(0x80 >> (uwX & 7));
 	for(UBYTE ubPlane = 0; ubPlane < pOut->Depth; ++ubPlane) {
-		UWORD *pPlane = (UWORD*)pOut->Planes[ubPlane];
+		UBYTE *p = planeByte(pOut, ubPlane, uwX, uwY);
 		if(ubColor & 1) {
-			pPlane[ulOffset] |= uwMask;
+			*p |= ubMask;
 		}
 		else {
-			pPlane[ulOffset] &= ~uwMask;
+			*p &= (UBYTE)~ubMask;
 		}
 		ubColor >>= 1;
 	}

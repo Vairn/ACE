@@ -104,7 +104,7 @@ void fileFlush(tFile *pFile) {
 }
 #endif
 
-ULONG fileReadBytes(tFile *pFile, UBYTE *pDest, ULONG ulCount) {
+ULONG fileReadBytes(tFile *pFile, void *pDest, ULONG ulCount) {
 	if(!pFile) {
 		logWrite("ERR: Null file handle\n");
 	}
@@ -137,7 +137,7 @@ ULONG fileReadLongs(tFile *pFile, ULONG *pDest, ULONG ulCount) {
 	return ulReadCount;
 }
 
-ULONG fileWriteBytes(tFile *pFile, const UBYTE *pSrc, ULONG ulCount) {
+ULONG fileWriteBytes(tFile *pFile, const void *pSrc, ULONG ulCount) {
 	if(!pFile) {
 		logWrite("ERR: Null file handle\n");
 	}

@@ -313,7 +313,8 @@ Host is almost always LE; Amiga is BE. The important patches:
 | `tRayPos` | LE overlay of `(vposr<<16)\|vhposr` |
 | Sprite header bitfields | `unsigned short` packing |
 | CHIP RAM / copper DMA | Always BE 16-bit words |
-| `endianBig16/32` | Swap on host (`endian.h` treats ACE_HOST like a LE machine) |
+| `endianBig16/32` | Removed — use `endianBigToNative16/32` etc. (`endian.h` treats ACE_HOST like a LE machine) |
+| File I/O | `fileReadBytes/Words/Longs` + `fileWriteBytes/Words/Longs`; wire format is always big-endian, and on the host the `Words`/`Longs` variants swap to/from native LE automatically. Bitplane/PCM payloads stay raw bytes via `fileReadBytes`/`fileWriteBytes` |
 | `REGPTR` | Not `* const` — `g_pCustom` is bound after the bus exists |
 | Tags | `tTag` is `uintptr_t` so 64-bit hosts can pass pointers in taglists |
 | `CHIP` / `FAR` / `INTERRUPT` | No-ops (`include/ace/types.h`) |

@@ -132,14 +132,14 @@ Then, add a function to load your map. The map is loaded column by column for sp
 static void loadMap(void) {
     logWrite("Map Loading...\n");
     tFile *pFileTilemap = diskFileOpen("data/overworld.dat", "rb");
-    fileRead(pFileTilemap, &s_uwMapTileWidth, sizeof(s_uwMapTileWidth));
-    fileRead(pFileTilemap, &s_uwMapTileHeight, sizeof(s_uwMapTileHeight));
+    fileReadWords(pFileTilemap, &s_uwMapTileWidth, 1);
+    fileReadWords(pFileTilemap, &s_uwMapTileHeight, 1);
     s_uwMapTileWidth++;
     s_uwMapTileHeight++;
     logWrite("Map Width %u",s_uwMapTileWidth);
     logWrite("Map Height %u",s_uwMapTileHeight);
     for (int x = 0; x < s_uwMapTileWidth; x++) {
-        fileRead(pFileTilemap, s_pMainBuffer->pTileData[x], s_uwMapTileHeight);
+        fileReadBytes(pFileTilemap, s_pMainBuffer->pTileData[x], s_uwMapTileHeight);
     }
     fileClose(pFileTilemap); 
     logWrite("Map Loaded!\n");
