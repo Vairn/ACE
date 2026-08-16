@@ -31,7 +31,7 @@ void paletteLoadFromFd(tFile *pFile, UWORD *pPalette, UWORD uwMaxLength) {
 	}
 
 	UBYTE ubFirst;
-	fileRead(pFile, &ubFirst, sizeof(UBYTE));
+	fileReadBytes(pFile, &ubFirst, 1);
 
 	if(ubFirst > 1) {
 		logWrite(
@@ -43,8 +43,7 @@ void paletteLoadFromFd(tFile *pFile, UWORD *pPalette, UWORD uwMaxLength) {
 	}
 
 	UWORD uwNumInFile;
-	fileRead(pFile, &uwNumInFile, sizeof(UWORD));
-	uwNumInFile = endianBig16(uwNumInFile);
+	fileReadWords(pFile, &uwNumInFile, 1);
 	UWORD uwColorsRead = MIN(uwNumInFile, uwMaxLength);
 
 	logWrite(
@@ -53,19 +52,10 @@ void paletteLoadFromFd(tFile *pFile, UWORD *pPalette, UWORD uwMaxLength) {
 	);
 
 	if(ubFirst == PLT_V2_ECS) {
-		UWORD i;
-		fileRead(pFile, pPalette, sizeof(UWORD) * uwColorsRead);
-		for(i = 0; i < uwColorsRead; ++i) {
-			pPalette[i] = endianBig16(pPalette[i]);
-		}
+		fileReadWords(pFile, pPalette, uwColorsRead);
 	}
 	else {
-		ULONG i;
-		ULONG *pAga = (ULONG *)pPalette;
-		fileRead(pFile, pPalette, sizeof(ULONG) * uwColorsRead);
-		for(i = 0; i < uwColorsRead; ++i) {
-			pAga[i] = endianBig32(pAga[i]);
-		}
+		fileReadLongs(pFile, (ULONG*)pPalette, uwColorsRead);
 	}
 
 	fileClose(pFile);
@@ -92,18 +82,9 @@ void paletteSaveOcs(const UWORD *pPalette, UWORD uwColorCnt, char *szPath) {
 
 	UBYTE ubSentinel = PLT_V2_ECS;
 
-	fileWrite(pFile, &ubSentinel, sizeof(UBYTE));
-	{
-		UWORD uwWire = endianBig16(uwColorCnt);
-		fileWrite(pFile, &uwWire, sizeof(UWORD));
-	}
-	{
-		UWORD i;
-		for(i = 0; i < uwColorCnt; ++i) {
-			UWORD uwWire = endianBig16(pPalette[i]);
-			fileWrite(pFile, &uwWire, sizeof(UWORD));
-		}
-	}
+fileWriteBytes(pFile, &ubSentinel, 1);
+	fileWriteWords(pFile, &uwColorCnt, 1);
+	fileWriteWords(pFile, pPalette, uwColorCnt);
 	fileClose(pFile);
 
 	logBlockEnd("paletteSaveOcs()");
@@ -125,25 +106,9 @@ void paletteSaveAga(const ULONG *pPalette, UWORD uwColorCnt, char *szPath) {
 
 	UBYTE ubSentinel = PLT_V2_AGA;
 
-	fileWrite(pFile, &ubSentinel, sizeof(UBYTE));
-	{
-		UWORD uwWire = endianBig16(uwColorCnt);
-		fileWrite(pFile, &uwWire, sizeof(UWORD));
-	}
-
-	for(UWORD i = 0; i < uwColorCnt; ++i) {
-		ULONG ul = pPalette[i];
-		UBYTE ubA = 0;
-		UBYTE ubR = (ul >> 16) & 0xFF;
-		UBYTE ubG = (ul >> 8) & 0xFF;
-		UBYTE ubB = ul & 0xFF;
-
-		fileWrite(pFile, &ubA, sizeof(UBYTE));
-		fileWrite(pFile, &ubR, sizeof(UBYTE));
-		fileWrite(pFile, &ubG, sizeof(UBYTE));
-		fileWrite(pFile, &ubB, sizeof(UBYTE));
-	}
-
+	fileWriteBytes(pFile, &ubSentinel, 1);
+	fileWriteWords(pFile, &uwColorCnt, 1);
+	fileWriteLongs(pFile, pPalette, uwColorCnt);
 	fileClose(pFile);
 
 	logBlockEnd("paletteSaveAga()");
