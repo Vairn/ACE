@@ -692,11 +692,17 @@ void aceHostSdlApplyInput(void) {
 static UWORD s_presentTmp[ACE_HOST_FB_WIDTH * ACE_HOST_FB_HEIGHT_PAL];
 
 /* Sleep until the next PAL (50 Hz) / NTSC (60 Hz) deadline. Vsync alone is
- * not enough: a 60/144 Hz display would run the playfield too fast. */
+ * not enough: a 60/144 Hz display would run the playfield too fast. With the
+ * chipset thread running it is the sole pace owner and the game thread must
+ * NOT sleep a second 50 Hz period here — the beam is already advancing on a
+ * single monotonic deadline. */
 static void aceHostPaceVblank(void) {
 	unsigned hz;
 	Uint64 period, now;
 	hz = s_isPal ? 50u : 60u;
+	if(chipsetThreadRunning()) {
+		return;
+	}
 	period = (s_paceFreq + (hz / 2u)) / hz;
 	if(!period) {
 		period = 1;
@@ -708,11 +714,7 @@ static void aceHostPaceVblank(void) {
 		return;
 	}
 	if(now < s_nextPace) {
-		Uint64 remainMs = (s_nextPace - now) * 1000u / s_paceFreq;
-		if(remainMs > 1u) {
-			SDL_Delay((Uint32)(remainMs - 1u));
-		}
-		now = SDL_GetPerformanceCounter();
+		hostOsSleepUntilTicks(s_nextPace);
 	}
 	/* Skip catch-up frames after a hitch so the next wait is a full period. */
 	if(now >= s_nextPace + period) {

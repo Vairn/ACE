@@ -1180,10 +1180,17 @@ static int beamAtVblank(void *ctx) {
 	return s_vblankThisTick;
 }
 
-/* Do not take chipLock here — that would stall the chipset thread. */
+/* Do not take chipLock here — that would stall the chipset thread. Poll at
+ * ~0.5 ms so the game thread wakes within ~half a millisecond of the beam
+ * deadline; otherwise the 1 ms SDL_Delay overshoot (plus scheduler quantum)
+ * lands the Present after the frame boundary and drops the cadence. */
 static void chipWaitPoll(int (*done)(void *), void *ctx) {
+	uint64_t freq = hostOsClockFreq();
+	if(!freq) {
+		freq = 1000;
+	}
 	while(!done(ctx) && s_chipRun) {
-		SDL_Delay(1);
+		hostOsSleepUntilTicks(hostOsClockTicks() + freq / 2000u);
 	}
 }
 
@@ -1214,43 +1221,43 @@ static Uint64 chipBeamTarget(UWORD uwY, int isExact) {
 	return ulFrame * (Uint64)s_lines + uwY;
 }
 
-/* Called after every scanline so VPOS tracks wall clock. Pacing once per frame
- * instead ran all 313 lines in a burst and parked at line 0 for the rest of the
- * period, so a wait for any line could only come true during the next burst —
- * every vPortWaitForPos cost a whole frame. Sleeps land in ~1 ms granules
- * (Sleep() cannot do the 64 us of a single line). */
+/* Called after every scanline so VPOS tracks wall clock. Runs the whole PAL
+ * frame in a sub-ms burst, then parks at the exact top-of-frame deadline —
+ * not in 1 ms Sleep() quanta (which the old per-line targets never hit and
+ * made every wait for a mid-screen line cost a whole frame). This keeps a
+ * single pace owner while threading, and the game thread's Present wakes on
+ * the same boundary. */
 static void chipThreadPace(void) {
 	unsigned hz = s_isPal ? 50u : 60u;
-	Uint64 period, now, target;
+	Uint64 period, target, now;
+	if(s_uwVpos != 0) {
+		return;
+	}
+	s_threadPaceFreq = hostOsClockFreq();
 	if(!s_threadPaceFreq) {
-		s_threadPaceFreq = SDL_GetPerformanceFrequency();
-		if(!s_threadPaceFreq) {
-			s_threadPaceFreq = 1000;
-		}
+		s_threadPaceFreq = 1000;
 	}
 	period = (s_threadPaceFreq + (hz / 2u)) / hz;
-	now = SDL_GetPerformanceCounter();
+	now = hostOsClockTicks();
 	if(!s_paceFrameStart) {
 		s_paceFrameStart = now;
 		return;
 	}
-	target = s_paceFrameStart + (Uint64)s_uwVpos * period / (Uint64)s_lines;
+	target = s_paceFrameStart + period;
 	if(now < target) {
-		Uint64 remainMs = (target - now) * 1000u / s_threadPaceFreq;
-		if(remainMs >= 1u) {
-			SDL_Delay((Uint32)remainMs);
-		}
+		hostOsSleepUntilTicks(target);
 	}
-	if(s_uwVpos == 0) {
-		s_paceFrameStart += period;
-		/* Resync after a hitch instead of racing to catch up. */
-		now = SDL_GetPerformanceCounter();
-		if(now >= s_paceFrameStart + period) {
-			s_paceFrameStart = now;
-		}
+	s_paceFrameStart += period;
+	/* Resync after a long hitch instead of racing to catch up. */
+	now = hostOsClockTicks();
+	if(now >= s_paceFrameStart + period) {
+		s_paceFrameStart = now;
 	}
 }
 
+/* The chipset thread is the only pace owner while it runs: it drives VPOS on a
+ * single monotonic deadline, and aceHostOnVblank is invoked from the game
+ * thread's wait so Present happens on the game thread. */
 static int SDLCALL chipThreadFn(void *ud) {
 	(void)ud;
 	s_chipThreadId = SDL_ThreadID();
@@ -1354,8 +1361,14 @@ void chipsetRunUntilVpos(UWORD uwY, int isExact) {
 		 * would then lose a whole frame. */
 		{
 			Uint64 ulTarget = chipBeamTarget(uwY, isExact);
+			uint64_t tickFreq = hostOsClockFreq();
+			if(!tickFreq) {
+				tickFreq = 1000;
+			}
+			/* Poll at ~0.5 ms so a wait near the top of a frame cannot be
+			 * stepped over by the old 1 ms delay. */
 			while(chipBeamAbs() < ulTarget && s_chipRun) {
-				SDL_Delay(1);
+				hostOsSleepUntilTicks(hostOsClockTicks() + tickFreq / 2000u);
 			}
 		}
 #else

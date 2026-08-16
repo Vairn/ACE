@@ -1,0 +1,82 @@
+Block begin: blitManagerCreate
+...OK, time:   0.0 us
+Block begin: copCreate()
+	Block begin: copListCreate()
+		[MEM] Allocated CHIP memory 0@000000002000000C, size 32 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/managers/copper.c:207)
+		Addr: 000000002000000C
+		[MEM] Allocated CHIP memory 1@000000002000004C, size 16 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/managers/copper.c:209)
+		[MEM] Allocated CHIP memory 2@000000002000007C, size 16 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/managers/copper.c:210)
+		BLOCK mode
+	Block end: copListCreate(), time:   0.0 us
+Block end: copCreate(), time:   0.0 us
+Block begin: keyCreate()
+...OK, time:   0.0 us
+Block begin: stateManagerCreate()
+	[MEM] Allocated CHIP memory 3@00000000200000AC, size 8 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/managers/state.c:31)
+Block end: stateManagerCreate(), time:   0.0 us
+Block begin: stateChange(pStateManager: 00000000200000AC, pState: 00007FF63A24F0A0)
+	Block begin: gsMenuCreate
+		Block begin: viewCreate(pTags: 0000000000000000)
+			[MEM] Allocated CHIP memory 4@00000000200000D4, size 32 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/utils/extview.c:24)
+			created PAL viewport addr: 00000000200000D4
+			Block begin: copListCreate()
+				[MEM] Allocated CHIP memory 5@0000000020000114, size 32 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/managers/copper.c:207)
+				Addr: 0000000020000114
+				[MEM] Allocated CHIP memory 6@0000000020000154, size 16 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/managers/copper.c:209)
+				[MEM] Allocated CHIP memory 7@0000000020000184, size 16 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/managers/copper.c:210)
+				BLOCK mode
+			Block end: copListCreate(), time:   0.0 us
+			Extra flags: GLOBAL_PALETTE GLOBAL_BPP GLOBAL_HRES 
+			Display pos: 129,44, size: 320,256
+		Block end: viewCreate(), time:   0.0 us
+		Block begin: vPortCreate(pTagList: 0000000000000000)
+			[MEM] Allocated CHIP memory 8@00000000200001B4, size 48 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/utils/extview.c:348)
+			Addr: 00000000200001B4
+			Parent view: 00000000200000D4
+			Offsets: 0x0
+			Dimensions: 320x256@5 (LORES)
+			No prev VPorts - added to head
+			[MEM] Allocated CHIP memory 9@0000000020000204, size 64 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/utils/extview.c:461)
+		Block end: vPortCreate(), time:   0.0 us
+		Block begin: simpleBufferCreate(pTags: 0000000000000000, ...)
+			[MEM] Allocated CHIP memory 10@0000000020000264, size 88 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/managers/viewport/simplebuffer.c:209)
+			Addr: 0000000020000264
+			Parent VPort: 00000000200001B4
+			Bounds: 320x256
+			Block begin: bitmapCreate(uwWidth: 320, uwHeight: 256, ubDepth: 5, ubFlags: 1)
+				[MEM] Allocated CHIP memory 11@00000000200002DC, size 72 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/utils/bitmap.c:148)
+				addr: 00000000200002DC
+				[MEM] Allocated CHIP memory 12@0000000020000344, size 10244 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/utils/bitmap.c:20)
+				[MEM] Allocated CHIP memory 13@0000000020002B6C, size 10244 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/utils/bitmap.c:20)
+				[MEM] Allocated CHIP memory 14@0000000020005394, size 10244 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/utils/bitmap.c:20)
+				[MEM] Allocated CHIP memory 15@0000000020007BBC, size 10244 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/utils/bitmap.c:20)
+				[MEM] Allocated CHIP memory 16@000000002000A3E4, size 10244 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/utils/bitmap.c:20)
+			Block end: bitmapCreate(), time:   0.0 us
+			Block begin: cameraCreate(pVPort: 00000000200001B4, uwPosX: 0, uwPosY: 0, uwMaxX: 320, uwMaxY: 256, isDblBfr: 0)
+				[MEM] Allocated CHIP memory 17@000000002000CC0C, size 64 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/managers/viewport/camera.c:18)
+				Addr: 000000002000CC0C
+				Resetting camera bounds...
+				Block begin: cameraReset(pManager: 000000002000CC0C, uwStartX: 0, uwStartY: 0, uwWidth: 320, uwHeight: 256, isDblBfr: 0)
+					Camera max coord: 0,0
+				Block end: cameraReset(), time:   0.0 us
+				Attaching camera to VPort...
+				Manager 000000002000CC0C attached to head of VP 00000000200001B4
+			Block end: cameraCreate(), time:   0.0 us
+			Block begin: copBlockCreate(pCopList: 0000000020000114, uwMaxCmds: 15, uwWaitX: 220, uwWaitY: 43)
+				[MEM] Allocated CHIP memory 18@000000002000CC6C, size 32 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/managers/copper.c:287)
+				pAddr: 000000002000CC6C
+				[MEM] Allocated CHIP memory 19@000000002000CCAC, size 60 (C:/Development/Amiga/SmitACE/deps/ACE/src/ace/managers/copper.c:290)
+				Head: 0000000000000000
+				Added as head, next: 0000000000000000
+			Block end: copBlockCreate(), time:   0.0 us
+			Block begin: simpleBufferSetFront(pManager: 0000000020000264, pFront: 00000000200002DC)
+...OK, time:   0.0 us
+			DDFSTRT: 0038, DDFSTOP: 00D0, Modulo: 0
+			Manager 0000000020000264 attached as head of VP 00000000200001B4 before 000000002000CC0C
+		Block end: simpleBufferCreate(), time:   0.0 us
+		Block begin: diskFileOpen(szPath: 'data/silkscreen.fnt', eMode: 0, isUninterrupted: 1)
+			ERR: Can't open file
+		Block end: diskFileOpen(), time:   0.0 us
+		Block begin: fontCreateFromFd(pFontFile: 0000000000000000)
+			ERR: Null file handle
+		Block end: fontCreateFromFd(), time:   0.0 us

@@ -1,0 +1,38 @@
+[ACE_HOST] machine A1200  CHIP 2048K  FAST 0K  STRICT  bus=0000000020000000
+[ACE_HOST] headless (no SDL window)
+
+[ACE_HOST] CRASH exception=0xC0000005 addr=00007FF63A244409 rip=00007FF63A244409 rsp=00000033C49FFD90
+  av: read 0000000000000002
+call stack:
+  [0] 00007FF63A244409
+The filename, directory name, or volume label syntax is incorrect.
+  [1] 00007FF63A24F0A0
+The filename, directory name, or volume label syntax is incorrect.
+exe: C:\Development\Amiga\SmitACE\deps\ACE\build-host-aga\showcase.exe
+fault: 00007FF63A244409
+The filename, directory name, or volume label syntax is incorrect.
+stack (12 frames):
+  [0] 00007FF63A2432F7
+The filename, directory name, or volume label syntax is incorrect.
+  [1] 00007FF63A243566
+The filename, directory name, or volume label syntax is incorrect.
+  [2] 00007FFFB36C6896
+The filename, directory name, or volume label syntax is incorrect.
+  [3] 00007FFFB36C5C66
+The filename, directory name, or volume label syntax is incorrect.
+  [4] 00007FFFB37E43FE
+The filename, directory name, or volume label syntax is incorrect.
+  [5] 00007FF63A244409
+The filename, directory name, or volume label syntax is incorrect.
+  [6] 00007FF63A22ADFB
+The filename, directory name, or volume label syntax is incorrect.
+  [7] 00007FF63A24E1A2
+The filename, directory name, or volume label syntax is incorrect.
+  [8] 00007FF63A2212EE
+The filename, directory name, or volume label syntax is incorrect.
+  [9] 00007FF63A221406
+The filename, directory name, or volume label syntax is incorrect.
+  [10] 00007FFFB25ECCB7
+The filename, directory name, or volume label syntax is incorrect.
+  [11] 00007FFFB372AD6C
+The filename, directory name, or volume label syntax is incorrect.

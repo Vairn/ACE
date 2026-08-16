@@ -2,10 +2,21 @@
 #define ACE_HOST_OS_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Monotonic high-resolution clock, stable across the host build. These are
+ * used by the frame pacers ("Sleep(1)" has ~1 ms granularity even with
+ * timeBeginPeriod(1), which makes the emulated beam land early/late by a
+ * millisecond or worse per frame). */
+uint64_t hostOsClockFreq(void);
+uint64_t hostOsClockTicks(void);
+/* Busy-park until the given deadline. Returns when the clock is at/after it,
+ * spinning the last <=2 ms so a shortened timer quantum cannot steal it. */
+void hostOsSleepUntilTicks(uint64_t deadline);
 
 void *hostOsMapLow(size_t size);
 void hostOsUnmapLow(void *p, size_t size);

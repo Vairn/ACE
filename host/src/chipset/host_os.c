@@ -230,6 +230,58 @@ void hostOsTimerHiRes(int on) {
 #endif
 }
 
+uint64_t hostOsClockFreq(void) {
+#ifdef _WIN32
+	LARGE_INTEGER li;
+	QueryPerformanceFrequency(&li);
+	return (uint64_t)li.QuadPart;
+#else
+	return 1000000000ull;
+#endif
+}
+
+uint64_t hostOsClockTicks(void) {
+#ifdef _WIN32
+	LARGE_INTEGER li;
+	QueryPerformanceCounter(&li);
+	return (uint64_t)li.QuadPart;
+#else
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+#endif
+}
+
+void hostOsSleepUntilTicks(uint64_t deadline) {
+	uint64_t freq = hostOsClockFreq();
+	uint64_t now;
+	for(;;) {
+		int64_t remain;
+		uint64_t us;
+		now = hostOsClockTicks();
+		if(now >= deadline) {
+			return;
+		}
+		remain = (int64_t)(deadline - now);
+		us = (uint64_t)remain * 1000000ull / freq;
+		if(us > 3000ull) {
+			/* Sleep most of the gap, then let the loop spin the tail. */
+#ifdef _WIN32
+			Sleep((DWORD)((us - 1500ull) / 1000ull));
+#else
+			{
+				struct timespec req;
+				uint64_t ns = (us - 1500ull) * 1000ull;
+				req.tv_sec = (time_t)(ns / 1000000000ull);
+				req.tv_nsec = (long)(ns % 1000000000ull);
+				nanosleep(&req, 0);
+			}
+#endif
+		}
+		/* else: park tightly; a Sleep(1) overshoot would break the cadence */
+	}
+}
+
 #ifdef _WIN32
 void *hostOsHeapMalloc(size_t n) {
 	if(!n) {
