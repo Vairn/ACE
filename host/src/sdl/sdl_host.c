@@ -34,13 +34,36 @@ static SDL_Renderer *s_ren;
 static SDL_Texture *s_tex;
 static SDL_AudioDeviceID s_audio;
 static int s_texW, s_texH;
-static UWORD s_scaleBuf[ACE_HOST_FB_WIDTH * 3 * ACE_HOST_FB_HEIGHT_PAL * 3];
 #ifdef ACE_HOST_USE_VIRTUAL_JOYSTICK
 static SDL_GameController *s_pad;
 #endif
 static Uint64 s_paceFreq;
 static Uint64 s_nextPace;
 static int s_paceReady;
+
+/* Present does scale + SDL_UpdateTexture/RenderCopy/RenderPresent on a
+ * dedicated thread so the game thread never blocks on vsync or on software
+ * filters (hq3x @ scale 3 etc). The game thread only copies the framebuffer
+ * into the next free ring slot; the ring lets us drop a frame instead of
+ * stalling the emulation when a display hiccup happens. The present thread
+ * parks in an SDL_semaphore channel. */
+#define ACE_HOST_PRESENT_SLOTS 8
+static UWORD s_presentRing[ACE_HOST_PRESENT_SLOTS][ACE_HOST_FB_WIDTH * ACE_HOST_FB_HEIGHT_PAL];
+static UWORD s_presentTmp[ACE_HOST_FB_WIDTH * ACE_HOST_FB_HEIGHT_PAL];
+static UWORD s_presentScale[ACE_HOST_FB_WIDTH * 3 * ACE_HOST_FB_HEIGHT_PAL * 3];
+static volatile int s_presentRun;
+static SDL_Thread *s_presentTh;
+static SDL_sem *s_presentSem;     /* posted for each queued frame */
+static SDL_mutex *s_presentMx;    /* guards ring head/tail + pending chrome */
+static volatile int s_presentHead;   /* next slot to draw into (write side) */
+static volatile int s_presentTail;   /* next slot to present (read side) */
+static int s_presentChrome;       /* pending aceHostChromeConsumeApply bits */
+static volatile int s_presentDrops;   /* ring overflow: frames dropped */
+
+/* Called by applyChrome() while the present thread owns all SDL render state.
+ * Queues the chrome change instead of mutating SDL objects on the game thread. */
+static void presentQueueChrome(int bits);
+static int sdlPresentThread(void *ud);
 
 static void audioCb(void *ud, Uint8 *stream, int len) {
 	(void)ud;
@@ -380,22 +403,28 @@ static void applyFullscreen(void) {
 }
 
 static void applyChrome(int bits) {
+	/* All SDL render state (s_ren/s_tex/window flags) is owned by the present
+	 * thread. Mutating it here on the game thread while the present thread is
+	 * mid-render would be a data race, so we hand the bits to the present
+	 * thread's queue and wake it. Settings are saved here (game thread) so a
+	 * killed process still persists choices like before. */
 	if(!bits) {
 		return;
 	}
-	if(bits & ACE_HOST_CHROME_APPLY_RENDER) {
-		recreateHostRenderer();
-	}
-	else if(bits & ACE_HOST_CHROME_APPLY_TEXTURE) {
-		createHostTexture();
-	}
-	if(bits & ACE_HOST_CHROME_APPLY_WINDOW) {
-		applyFullscreen();
-	}
-	paulaSetHostVolume(aceHostSettings()->volume);
 	if(s_iniPath[0]) {
 		aceHostSettingsSave(s_iniPath);
 	}
+	presentQueueChrome(bits);
+}
+
+static void presentQueueChrome(int bits) {
+	if(!bits || !s_presentMx || !s_presentSem) {
+		return;
+	}
+	SDL_LockMutex(s_presentMx);
+	s_presentChrome |= bits;
+	SDL_UnlockMutex(s_presentMx);
+	SDL_SemPost(s_presentSem);
 }
 
 static void resolveIniPath(void) {
@@ -490,14 +519,16 @@ void aceHostSdlInit(int isPal) {
 			uw * st->scale, uh * st->scale,
 			SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI
 		);
-		recreateHostRenderer();
-		applyFullscreen();
+		/* Renderer/texture are owned by the present thread from here on. */
 		paulaSetHostVolume(st->volume);
 		memset(&want, 0, sizeof(want));
 		want.freq = 44100;
 		want.format = AUDIO_S16SYS;
 		want.channels = 2;
-		want.samples = 1024;
+		/* 2048-frame device buffer: the audio callback runs ~21x/sec instead
+		 * of ~43x, so the producer burst (882/16.6ms) has room to accumulate
+		 * between pulls instead of the callback catching the ring dry. */
+		want.samples = 2048;
 		want.callback = audioCb;
 		s_audio = SDL_OpenAudioDevice(
 			NULL, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE
@@ -525,6 +556,25 @@ void aceHostSdlInit(int isPal) {
 		fprintf(stderr, "[ACE_HOST] video scale=%d aspect=%d filter=%d fs=%d ini=%s\n",
 			st->scale, st->aspect, st->filter, st->fullscreen,
 			s_iniPath[0] ? s_iniPath : "(none)");
+		s_presentRun = 1;
+		s_presentHead = 0;
+		s_presentTail = 0;
+		s_presentChrome = 0;
+		s_presentSem = SDL_CreateSemaphore(0);
+		s_presentMx = SDL_CreateMutex();
+		s_presentTh = SDL_CreateThread(sdlPresentThread, "ace-present", NULL);
+		if(!s_presentTh) {
+			fprintf(stderr, "[ACE_HOST] present thread failed: %s\n", SDL_GetError());
+			s_presentRun = 0;
+			SDL_DestroySemaphore(s_presentSem);
+			s_presentSem = 0;
+			SDL_DestroyMutex(s_presentMx);
+			s_presentMx = 0;
+		}
+		else {
+			fprintf(stderr, "[ACE_HOST] present thread started\n");
+			presentQueueChrome(ACE_HOST_CHROME_APPLY_RENDER | ACE_HOST_CHROME_APPLY_TEXTURE);
+		}
 	}
 #else
 	fprintf(stderr, "[ACE_HOST] built without SDL2 — no window/audio\n");
@@ -535,6 +585,24 @@ void aceHostSdlShutdown(void) {
 #ifdef ACE_HOST_HAS_SDL
 	if(s_iniPath[0]) {
 		aceHostSettingsSave(s_iniPath);
+	}
+	if(s_presentTh) {
+		/* Tell the present thread to exit, wake it, and join it before we
+		 * destroy the SDL renderer/texture/window it owns. */
+		SDL_LockMutex(s_presentMx);
+		s_presentRun = 0;
+		SDL_UnlockMutex(s_presentMx);
+		SDL_SemPost(s_presentSem);
+		SDL_WaitThread(s_presentTh, 0);
+		s_presentTh = 0;
+	}
+	if(s_presentSem) {
+		SDL_DestroySemaphore(s_presentSem);
+		s_presentSem = 0;
+	}
+	if(s_presentMx) {
+		SDL_DestroyMutex(s_presentMx);
+		s_presentMx = 0;
 	}
 	if(s_audio) {
 		SDL_CloseAudioDevice(s_audio);
@@ -689,8 +757,6 @@ void aceHostSdlApplyInput(void) {
 }
 
 #ifdef ACE_HOST_HAS_SDL
-static UWORD s_presentTmp[ACE_HOST_FB_WIDTH * ACE_HOST_FB_HEIGHT_PAL];
-
 /* Sleep until the next PAL (50 Hz) / NTSC (60 Hz) deadline. Vsync alone is
  * not enough: a 60/144 Hz display would run the playfield too fast. With the
  * chipset thread running it is the sole pace owner and the game thread must
@@ -728,103 +794,153 @@ static void aceHostPaceVblank(void) {
 
 void aceHostSdlPresent(const UWORD *pFb, int width, int height) {
 #ifdef ACE_HOST_HAS_SDL
-	SDL_Rect dst;
-	int rw, rh, scale, unitW, unitH;
-	tAceHostSettings *st;
-	int menu, n;
-	const UWORD *upload;
-	int upW, upH;
-	if(s_headless || !s_ren || !s_tex) {
+	int next;
+	if(s_headless || !s_presentRun || !s_presentSem || !s_presentMx) {
 		return;
 	}
-	st = aceHostSettings();
-	menu = aceHostMenuIsOpen();
-	memcpy(s_presentTmp, pFb, (size_t)width * (size_t)height * sizeof(UWORD));
-#ifdef ACE_HOST_DEBUG
-	if(s_hudOn) {
-		aceHostHudDraw(s_presentTmp, width, height);
+	SDL_LockMutex(s_presentMx);
+	next = (s_presentHead + 1) % ACE_HOST_PRESENT_SLOTS;
+	/* Ring full → the present thread is behind (vsync hiccup / heavy filter).
+	 * Instead of stalling the emulation, drop the oldest pending frame. */
+	if(next == s_presentTail) {
+		s_presentTail = (s_presentTail + 1) % ACE_HOST_PRESENT_SLOTS;
+		s_presentDrops++;
+		next = (s_presentHead + 1) % ACE_HOST_PRESENT_SLOTS;
 	}
+	SDL_UnlockMutex(s_presentMx);
+	memcpy(s_presentRing[next], pFb, (size_t)width * (size_t)height * sizeof(UWORD));
+	/* Memory barrier via the mutex so the present thread sees the copy. */
+	SDL_LockMutex(s_presentMx);
+	s_presentHead = next;
+	SDL_UnlockMutex(s_presentMx);
+	SDL_SemPost(s_presentSem);
+#else
+	(void)pFb;
+	(void)width;
+	(void)height;
 #endif
-	if(menu) {
-		aceHostMenuDraw(s_presentTmp, width, height);
-	}
-	n = filterInteger();
-	upload = s_presentTmp;
-	upW = width;
-	upH = height;
-	if(!menu && n > 1) {
-		if(st->filter == ACE_HOST_FILTER_SCALE2X) {
-			aceHostScale2x(s_presentTmp, width, height, s_scaleBuf);
+}
+
+/* Runs on the present thread. Owns s_ren/s_tex and the ring read side, and
+ * performs the software scale filters plus the (blocking, vsync'd) render. */
+static int sdlPresentThread(void *ud) {
+	(void)ud;
+#ifdef ACE_HOST_HAS_SDL
+	UWORD *tmp = s_presentTmp;
+	int firstPresent = 1;
+	Uint64 lastDropLog = 0;
+	while(s_presentRun) {
+		int chrome, menu, n, slot;
+		tAceHostSettings *st = aceHostSettings();
+		const UWORD *upload;
+		int upW, upH;
+		SDL_Rect dst;
+		int rw, rh, scale, unitW, unitH;
+		int width = ACE_HOST_FB_WIDTH, height = fbHeight();
+		Uint64 now;
+		Uint64 freq = SDL_GetPerformanceFrequency();
+
+		/* Park until a frame is queued. A 16 ms timeout also lets keyed chrome
+		 * changes and shutdown be serviced when no frame arrives. */
+		if(SDL_SemWaitTimeout(s_presentSem, 16)) {
+			continue;
 		}
-		else if(st->filter == ACE_HOST_FILTER_HQ2X) {
-			aceHostHq2x(s_presentTmp, width, height, s_scaleBuf);
-		}
-		else if(st->filter == ACE_HOST_FILTER_HQ3X) {
-			aceHostHq3x(s_presentTmp, width, height, s_scaleBuf);
-		}
-		else {
-			int x, y;
-			int dw = width * 2;
-			for(y = 0; y < height; ++y) {
-				for(x = 0; x < width; ++x) {
-					UWORD p = s_presentTmp[y * width + x];
-					s_scaleBuf[(y * 2) * dw + x * 2] = p;
-					s_scaleBuf[(y * 2) * dw + x * 2 + 1] = p;
-					s_scaleBuf[(y * 2 + 1) * dw + x * 2] = p;
-					s_scaleBuf[(y * 2 + 1) * dw + x * 2 + 1] = p;
-				}
+		SDL_LockMutex(s_presentMx);
+		chrome = s_presentChrome;
+		s_presentChrome = 0;
+		SDL_UnlockMutex(s_presentMx);
+		if(chrome) {
+			if(chrome & ACE_HOST_CHROME_APPLY_RENDER) {
+				recreateHostRenderer();
 			}
-		}
-		upload = s_scaleBuf;
-		upW = width * n;
-		upH = height * n;
-		if(st->scanlines && st->filter != ACE_HOST_FILTER_LINEAR) {
-			int x, y;
-			for(y = 1; y < upH; y += 2) {
-				for(x = 0; x < upW; ++x) {
-					s_scaleBuf[y * upW + x] = (UWORD)((s_scaleBuf[y * upW + x] >> 1) & 0x7BEF);
-				}
+			else if(chrome & ACE_HOST_CHROME_APPLY_TEXTURE) {
+				createHostTexture();
 			}
+			if(chrome & ACE_HOST_CHROME_APPLY_WINDOW) {
+				applyFullscreen();
+			}
+			paulaSetHostVolume(st->volume);
 		}
-	}
-	if(s_texW != upW || s_texH != upH) {
-		createHostTexture();
-	}
-	if(!s_tex) {
-		return;
-	}
-	SDL_UpdateTexture(s_tex, NULL, upload, upW * (int)sizeof(UWORD));
-	SDL_GetRendererOutputSize(s_ren, &rw, &rh);
-	if(!menu && st->aspect == ACE_HOST_ASPECT_STRETCH) {
-		dst.x = 0;
-		dst.y = 0;
-		dst.w = rw;
-		dst.h = rh;
-		scale = 0;
-	}
-	else {
-		aspectUnit(&unitW, &unitH);
-		if(!menu && st->filter == ACE_HOST_FILTER_LINEAR) {
-			if(rw * unitH >= rh * unitW) {
-				dst.h = rh;
-				dst.w = rh * unitW / unitH;
-				dst.x = (rw - dst.w) / 2;
-				dst.y = 0;
+		if(s_presentTail == s_presentHead || !s_ren || !s_tex) {
+			continue;
+		}
+		slot = s_presentTail;
+		SDL_LockMutex(s_presentMx);
+		s_presentTail = (s_presentTail + 1) % ACE_HOST_PRESENT_SLOTS;
+		SDL_UnlockMutex(s_presentMx);
+		/* Copy out of the ring early so the game thread can reuse the slot. */
+		memcpy(tmp, s_presentRing[slot], (size_t)width * (size_t)height * sizeof(UWORD));
+
+		menu = aceHostMenuIsOpen();
+#ifdef ACE_HOST_DEBUG
+		if(s_hudOn) {
+			aceHostHudDraw(tmp, width, height);
+		}
+#endif
+		if(menu) {
+			aceHostMenuDraw(tmp, width, height);
+		}
+		n = menu ? 1 : filterInteger();
+		upload = tmp;
+		upW = width;
+		upH = height;
+		if(n > 1) {
+			if(st->filter == ACE_HOST_FILTER_SCALE2X) {
+				aceHostScale2x(tmp, width, height, s_presentScale);
+			}
+			else if(st->filter == ACE_HOST_FILTER_HQ2X) {
+				aceHostHq2x(tmp, width, height, s_presentScale);
+			}
+			else if(st->filter == ACE_HOST_FILTER_HQ3X) {
+				aceHostHq3x(tmp, width, height, s_presentScale);
 			}
 			else {
-				dst.w = rw;
-				dst.h = rw * unitH / unitW;
-				dst.x = 0;
-				dst.y = (rh - dst.h) / 2;
+				int x, y;
+				int dw = width * 2;
+				for(y = 0; y < height; ++y) {
+					for(x = 0; x < width; ++x) {
+						UWORD p = tmp[y * width + x];
+						s_presentScale[(y * 2) * dw + x * 2] = p;
+						s_presentScale[(y * 2) * dw + x * 2 + 1] = p;
+						s_presentScale[(y * 2 + 1) * dw + x * 2] = p;
+						s_presentScale[(y * 2 + 1) * dw + x * 2 + 1] = p;
+					}
+				}
 			}
+			if(st->scanlines && st->filter != ACE_HOST_FILTER_LINEAR &&
+				st->filter != ACE_HOST_FILTER_SCALE2X) {
+				int x, y;
+				int totalW = width * n;
+				int totalH = height * n;
+				for(y = 1; y < totalH; y += 2) {
+					for(x = 0; x < totalW; ++x) {
+						s_presentScale[y * totalW + x] =
+							(UWORD)((s_presentScale[y * totalW + x] >> 1) & 0x7BEF);
+					}
+				}
+			}
+			upload = s_presentScale;
+			upW = width * n;
+			upH = height * n;
+		}
+		if(s_texW != upW || s_texH != upH) {
+			createHostTexture();
+		}
+		if(!s_tex) {
+			continue;
+		}
+		SDL_UpdateTexture(s_tex, NULL, upload, upW * (int)sizeof(UWORD));
+		SDL_GetRendererOutputSize(s_ren, &rw, &rh);
+		if(!menu && st->aspect == ACE_HOST_ASPECT_STRETCH) {
+			dst.x = 0;
+			dst.y = 0;
+			dst.w = rw;
+			dst.h = rh;
 			scale = 0;
 		}
 		else {
-			scale = rw / unitW;
-			if(rh / unitH < scale) {
-				scale = rh / unitH;
-			}
-			if(scale < 1) {
+			aspectUnit(&unitW, &unitH);
+			if(!menu && st->filter == ACE_HOST_FILTER_LINEAR) {
 				if(rw * unitH >= rh * unitW) {
 					dst.h = rh;
 					dst.w = rh * unitW / unitH;
@@ -837,33 +953,66 @@ void aceHostSdlPresent(const UWORD *pFb, int width, int height) {
 					dst.x = 0;
 					dst.y = (rh - dst.h) / 2;
 				}
+				scale = 0;
 			}
 			else {
-				dst.w = unitW * scale;
-				dst.h = unitH * scale;
-				dst.x = (rw - dst.w) / 2;
-				dst.y = (rh - dst.h) / 2;
+				scale = rw / unitW;
+				if(rh / unitH < scale) {
+					scale = rh / unitH;
+				}
+				if(scale < 1) {
+					if(rw * unitH >= rh * unitW) {
+						dst.h = rh;
+						dst.w = rh * unitW / unitH;
+						dst.x = (rw - dst.w) / 2;
+						dst.y = 0;
+					}
+					else {
+						dst.w = rw;
+						dst.h = rw * unitH / unitW;
+						dst.x = 0;
+						dst.y = (rh - dst.h) / 2;
+					}
+				}
+				else {
+					dst.w = unitW * scale;
+					dst.h = unitH * scale;
+					dst.x = (rw - dst.w) / 2;
+					dst.y = (rh - dst.h) / 2;
+				}
 			}
 		}
-	}
-	if(s_vbl == 0) {
-		int ww = 0, wh = 0;
-		if(s_win) {
-			SDL_GetWindowSize(s_win, &ww, &wh);
+		if(firstPresent) {
+			int ww = 0, wh = 0;
+			if(s_win) {
+				SDL_GetWindowSize(s_win, &ww, &wh);
+			}
+			fprintf(stderr,
+				"[ACE_HOST] present window=%dx%d renderer=%dx%d dest=%dx%d integer=%d\n",
+				ww, wh, rw, rh, dst.w, dst.h, scale);
+			firstPresent = 0;
 		}
-		fprintf(stderr,
-			"[ACE_HOST] present window=%dx%d renderer=%dx%d dest=%dx%d integer=%d\n",
-			ww, wh, rw, rh, dst.w, dst.h, scale);
+		/* Surface ring overflows at most ~once per second so a healthy beat
+		 * (emu 50Hz vs display 60Hz) isn't a log flood. */
+		if(s_presentDrops) {
+			now = SDL_GetPerformanceCounter();
+			if(!lastDropLog || (now - lastDropLog) >= freq) {
+				SDL_LockMutex(s_presentMx);
+				lastDropLog = now;
+				fprintf(stderr, "[ACE_HOST] present: %d dropped frame(s)\n", s_presentDrops);
+				s_presentDrops = 0;
+				SDL_UnlockMutex(s_presentMx);
+			}
+		}
+		SDL_SetRenderDrawColor(s_ren, 0, 0, 0, 255);
+		SDL_RenderClear(s_ren);
+		SDL_RenderCopy(s_ren, s_tex, NULL, &dst);
+		SDL_RenderPresent(s_ren);
 	}
-	SDL_SetRenderDrawColor(s_ren, 0, 0, 0, 255);
-	SDL_RenderClear(s_ren);
-	SDL_RenderCopy(s_ren, s_tex, NULL, &dst);
-	SDL_RenderPresent(s_ren);
 #else
-	(void)pFb;
-	(void)width;
-	(void)height;
+	(void)ud;
 #endif
+	return 0;
 }
 
 void aceHostOnVblank(void) {

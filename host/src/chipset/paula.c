@@ -1,12 +1,20 @@
 #include "chipset_priv.h"
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
 
 /* Mix at the SDL device rate (set by paulaSetOutputRate). 28867 Hz was the
- * Paula DMA ceiling, not the host output rate — the ring underran every frame. */
-#define RING 16384
+ * Paula DMA ceiling, not the host output rate — the ring underran every frame.
+ * The ring is a producer(emulator)/consumer(SDL callback) SPSC queue. It must
+ * be large enough to ride out the bursty per-frame production and the
+ * clock drift between the emu's 50 Hz and the host device clock; on underrun
+ * we hold the last sample instead of writing digital silence (clicks). */
+#define RING 32768
 #define VOL_SCALE 4 /* 8-bit * vol(0..64) * 4 → near 16-bit, two chans still sat */
+
+#define TARGET_FILL (RING / 3)   /* steady-state slack we aim to preserve   */
+#define UNDERRUN_SLACK 512       /* hold sample for this many frames before 0 */
 
 typedef struct tChan {
 	ULONG ptr;
@@ -34,6 +42,14 @@ static volatile unsigned s_rHead, s_rTail;
 static int s_mixAcc;
 static int s_outRate = 44100;
 static int s_hostVol = 10;
+static int s_lastL, s_lastR;      /* last produced sample */
+static int s_holdL, s_holdR;       /* underrun hold (consumer side) */
+static unsigned s_underrunFrames;  /* consecutive held frames for stats */
+
+static unsigned fill(void) {
+	unsigned h = s_rHead, t = s_rTail;
+	return (unsigned)((h + RING - t) % RING);
+}
 
 static ULONG ptrOf(APTR a) {
 	ULONG p = (ULONG)a;
@@ -170,8 +186,12 @@ void paulaDmaSlot(int ch) {
 static void pushSample(int16_t l, int16_t r) {
 	unsigned head = s_rHead;
 	unsigned next = (head + 1u) % RING;
+	s_lastL = l;
+	s_lastR = r;
 	if(next == s_rTail) {
-		return;
+		/* Full: the device is not keeping up. Drop the oldest sample so the
+		 * ring can never livelock; the consumer will then see a gap. */
+		s_rTail = (s_rTail + 1u) % RING;
 	}
 	s_ringL[head] = l;
 	s_ringR[head] = r;
@@ -200,16 +220,36 @@ static int sat16(int v) {
 
 void paulaMix(short *pOut, int nFrames) {
 	int f;
+	int underrun = 0;
 	for(f = 0; f < nFrames; ++f) {
-		int l = 0, r = 0;
+		int l = s_holdL, r = s_holdR;
 		unsigned tail = s_rTail;
 		if(tail != s_rHead) {
 			l = s_ringL[tail];
 			r = s_ringR[tail];
 			s_rTail = (tail + 1u) % RING;
+			s_holdL = l;
+			s_holdR = r;
+		}
+		else if(s_underrunFrames < UNDERRUN_SLACK) {
+			/* Ring empty: hold the last sample, not digital silence. */
+			++s_underrunFrames;
+		}
+		else {
+			underrun = 1;
+			break;
 		}
 		pOut[f * 2] = (short)((l * s_hostVol) / 10);
 		pOut[f * 2 + 1] = (short)((r * s_hostVol) / 10);
+	}
+	if(underrun) {
+		int i;
+		fprintf(stderr, "[ACE_HOST] audio underrun at fill=%u\n", fill());
+		for(i = f; i < nFrames; ++i) {
+			pOut[i * 2] = (short)((s_holdL * s_hostVol) / 10);
+			pOut[i * 2 + 1] = (short)((s_holdR * s_hostVol) / 10);
+		}
+		s_underrunFrames = 0;
 	}
 }
 
@@ -264,5 +304,12 @@ void paulaLineTick(int lineRate, ULONG paulaClock) {
 			advanceChannel(&s_ch[i], paulaClock);
 		}
 		pushSample((int16_t)sat16(l), (int16_t)sat16(r));
+	}
+	/* Drift compensation: if the device has drained the ring below the
+	 * steady-state target (device clock a hair faster than the emu's), top it
+	 * back up so the underrun path is never exercised in steady state.
+	 * Repeating the last produced sample is a one-sample ghost, inaudible. */
+	while(fill() < TARGET_FILL) {
+		pushSample((int16_t)sat16(s_lastL), (int16_t)sat16(s_lastR));
 	}
 }

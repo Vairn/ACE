@@ -376,12 +376,11 @@ void aceHostDispatchInts(UWORD uwPending) {
 		handled |= INTF_VERTB;
 	}
 	/* One-shot SFX disable DMA from the AUDx handler. ptplayer clears
-	 * INTF_INTEN around some SFX setup, so AUD must not wait on it. */
+	 * INTF_INTEN around some SFX setup, so AUD must not wait on it.
+	 * The mixer's AUD3 handler is what advances its double buffer, so it
+	 * must NOT be skipped here — otherwise only silence is ever played. */
 	for(i = INTB_AUD0; i <= INTB_AUD3; ++i) {
 		UWORD bit = (UWORD)(1u << i);
-		if(i == INTB_AUD3 && aceHostMixerOwnsAud3()) {
-			continue;
-		}
 		if((uwPending & bit) && s_pAceInterrupts[i].pHandler) {
 			s_pAceInterrupts[i].pHandler(g_pCustom, s_pAceInterrupts[i].pData);
 			handled |= bit;
